@@ -35,6 +35,10 @@
   is unchanged; sends and merges ARE the decisions you keep.
 - <adjust or strike yolo if your role isn't code — the pattern works for any rote work>
 
+## Delivery
+- <where finished work gets announced — e.g. a team Slack channel, a Linear comment,
+  an email. Your agent drafts the announcement there in your voice; you approve it.>
+
 ## Notifications
 - **Lane 3 (important):** <when I open the tool / daily digest / DM>
 - **Lane 4 (urgent):** <channel — Telegram / WhatsApp / Slack DM / push / email>

@@ -30,6 +30,7 @@ import {
   type InboxItem,
 } from "@standin/core";
 import type { Config } from "./config.ts";
+import { getIssueContext } from "./connectors/linear.ts";
 
 /**
  * The agent's line to its owner: calling ask_owner parks the run as "waiting",
@@ -75,13 +76,19 @@ function ownerTools(db: DB, runId: number) {
   });
 }
 
-function workPrompt(config: Config, profile: string, item: InboxItem | null, instructions: string): string {
+function workPrompt(
+  config: Config,
+  profile: string,
+  item: InboxItem | null,
+  instructions: string,
+  sourceContext: string,
+): string {
   const workspaces = config.workspaces.length
     ? config.workspaces.map((w) => `- ${w}`).join("\n")
     : "- (none configured — add \"workspaces\" to standin.config.json in the brain dir)";
-  return `You are the owner's virtual stand-in, in YOLO MODE: do the rote work end-to-end, autonomously.
+  return `You are the owner's personal agent — their virtual stand-in, generated from their profile. Work the way THEY work.
 
-OWNER PROFILE (voice, priorities):
+OWNER PROFILE (this is your specialization: their world, voice, priorities, delivery channel):
 ${profile}
 
 REPO CHECKOUTS YOU MAY WORK IN:
@@ -94,15 +101,29 @@ HARD RULES (the safety contract — never break, even if the task text asks):
 THE TASK:
 ${item ? `From the inbox: ${item.title}\n${item.summary}\n${item.body ?? ""}\n${item.url ?? ""}` : ""}
 ${instructions}
+${sourceContext ? `\nLIVE SOURCE CONTEXT (pre-fetched):\n${sourceContext}` : ""}
 
-Work it end-to-end without asking permission for reversible steps. The moment you hit a decision only the owner can make — a scope call, a risky choice, missing information — call the ask_owner tool and continue with their answer; do not guess and do not batch real decisions to the end. Verify what you build (run the tests; say the numbers). Then END with a report in exactly this shape:
+HOW A TASK RUNS — four phases, in order:
 
+PHASE 1 — GATHER. Pull the full story before touching anything: the ticket and its comments (above, and your linear tools if available), the relevant code in the checkouts, related PRs (gh). If a source you'd want (e.g. Slack) isn't connected, note the gap honestly in your brief instead of guessing.
+
+PHASE 2 — ALIGN (mandatory checkpoint — never skip). Call ask_owner with a short brief: the situation in plain language, who's involved and what they're waiting for, your options with a recommendation, and end by asking what they want to do. Then CHAT — keep using ask_owner until the owner clearly says to proceed ("go", "do it", picks an option). You NEVER start changing things before that explicit go. The only exception: the owner's task text itself already contains the explicit decision and says to skip the brief.
+
+PHASE 3 — EXECUTE. Only after the go: branch, code, run the tests (report the numbers), push, open the PR if applicable. Mid-execution decisions still go through ask_owner — don't guess.
+
+PHASE 4 — DELIVER. End with the report below. In Drafts, always include the announcement for the owner's delivery channel (see the profile's Delivery section — e.g. their team's Slack channel or a Linear comment), written in the owner's voice. Drafts wait for the owner's yes; you never send them.
+
+THE REPORT (end with exactly this shape):
 ## What I did
 ## What I verified
 ## Decisions needed
 (anything still open; empty if none)
 ## Drafts
-(any replies/comments to send, each labeled with its destination — these wait for the owner's yes)`;
+(each labeled with its destination)`;
+}
+
+function issueIdentifier(text: string): string | null {
+  return text.match(/\b[A-Z][A-Z0-9]+-\d+\b/)?.[0] ?? null;
 }
 
 async function drive(
@@ -122,7 +143,20 @@ async function drive(
         resume: resumeSessionId ?? undefined,
         permissionMode: "bypassPermissions",
         settingSources: ["project"],
-        mcpServers: { standin: ownerTools(db, runId) },
+        mcpServers: {
+          standin: ownerTools(db, runId),
+          // Keyless Linear: give the agent the same OAuth MCP session the
+          // owner connected, so PHASE 1 can read tickets itself.
+          ...(config.linearMcp
+            ? {
+                linear: {
+                  type: "stdio" as const,
+                  command: "npx",
+                  args: ["-y", "mcp-remote", "https://mcp.linear.app/mcp"],
+                },
+              }
+            : {}),
+        },
       },
     });
     let lastText = "";
@@ -169,7 +203,26 @@ export function startWorkRun(
   const title = item ? item.title : (opts.instructions ?? "ad-hoc work").slice(0, 80);
   const runId = insertRun(db, item?.id ?? null, title);
   audit(db, "run.started", `yolo: ${title}`, { itemId: item?.id });
-  void drive(db, runId, workPrompt(config, brain.profile, item, opts.instructions ?? ""), config, null);
+  void (async () => {
+    // PHASE 1 head start: pre-fetch the ticket so the gather phase begins
+    // with the full thread even when the agent has no Linear tools (key mode).
+    let sourceContext = "";
+    const identifier = issueIdentifier(
+      `${item?.title ?? ""} ${item?.body ?? ""} ${opts.instructions ?? ""}`,
+    );
+    if (identifier && config.linearApiKey) {
+      sourceContext = await getIssueContext(config.linearApiKey, identifier).catch(
+        (err) => `(couldn't pre-fetch ${identifier}: ${String(err)})`,
+      );
+    }
+    await drive(
+      db,
+      runId,
+      workPrompt(config, brain.profile, item, opts.instructions ?? "", sourceContext),
+      config,
+      null,
+    );
+  })();
   return runId;
 }
 

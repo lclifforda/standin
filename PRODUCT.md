@@ -10,6 +10,21 @@
 and what you care about from your real messages, does the rote work end-to-end, and leaves
 you only the decisions. It never sends or merges anything without your yes.
 
+## The thesis
+
+**Describe what you work on → your agent exists.** Onboarding and training compile a
+person's plain-language description and real writing into their profile — and the profile
+IS the agent: every triage, ask, and work run is prompted from it (their sources, their
+line between noise and signal, their voice, their delivery channel). No agent authoring,
+no prompt engineering by the user. A new person gets a specifically-theirs agent the day
+they describe their job.
+
+Every task runs the same human-in-command pipeline:
+**gather** (ticket, thread, code, whatever's connected) → **align** (the agent briefs the
+owner and they chat until the owner says go — mandatory, never skipped) → **execute**
+(branch, code, test, push) → **deliver** (report + announcement drafted for the owner's
+delivery channel, sent only on their yes).
+
 ## What already works (proven on user zero, Sep 2026)
 
 | Piece | Status |
