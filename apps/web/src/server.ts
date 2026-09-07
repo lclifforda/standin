@@ -14,9 +14,12 @@ import {
   appendDecision,
   audit,
   executeApproved,
+  answerQuestion,
   getItem,
+  getQuestion,
   getRun,
   getSetting,
+  pendingQuestion,
   laneCounts,
   listAudit,
   listItems,
@@ -93,7 +96,20 @@ const server = createServer(async (req, res) => {
       audit(db, "yolo.toggled", body.on ? "yolo mode ON" : "yolo mode OFF");
       json(res, 200, { on: body.on === true });
     } else if (req.method === "GET" && url.pathname === "/api/runs") {
-      json(res, 200, { runs: listRuns(db) });
+      const runs = listRuns(db).map((r) => ({
+        ...r,
+        question: r.status === "waiting" ? pendingQuestion(db, r.id) : null,
+      }));
+      json(res, 200, { runs });
+    } else if (req.method === "POST" && url.pathname.match(/^\/api\/questions\/\d+\/answer$/)) {
+      const qId = Number(url.pathname.split("/")[3]);
+      const body = await readBody(req);
+      if (typeof body.answer !== "string" || !body.answer.trim())
+        return json(res, 400, { error: "answer required" });
+      if (!getQuestion(db, qId)) return json(res, 404, { error: "no such question" });
+      answerQuestion(db, qId, body.answer.trim());
+      audit(db, "run.answered", `question #${qId} answered by owner`);
+      json(res, 200, { ok: true });
     } else if (req.method === "GET" && url.pathname.match(/^\/api\/runs\/\d+$/)) {
       const run = getRun(db, Number(url.pathname.split("/")[3]));
       run ? json(res, 200, { run }) : json(res, 404, { error: "no such run" });

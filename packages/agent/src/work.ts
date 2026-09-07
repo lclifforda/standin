@@ -11,20 +11,69 @@
  * back as text; the owner answers in the UI and the session resumes.
  */
 import { homedir } from "node:os";
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { setTimeout as sleep } from "node:timers/promises";
+import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
 import {
   appendRunLog,
   audit,
   finishRun,
   getItem,
+  getQuestion,
   getRun,
+  insertQuestion,
   insertRun,
   loadBrain,
   markRunResumed,
+  setRunStatus,
   type DB,
   type InboxItem,
 } from "@standin/core";
 import type { Config } from "./config.ts";
+
+/**
+ * The agent's line to its owner: calling ask_owner parks the run as "waiting",
+ * surfaces the question in the UI, and blocks until the owner answers there.
+ * After 2 hours unanswered it unblocks with "use your judgment and flag it".
+ */
+function ownerTools(db: DB, runId: number) {
+  return createSdkMcpServer({
+    name: "standin",
+    version: "0.1.0",
+    tools: [
+      tool(
+        "ask_owner",
+        "Ask the owner a question you cannot decide yourself (a scope call, a risky choice, missing information). Blocks until they answer in the UI. Use it the moment a real decision appears — do not guess, and do not save questions for the end.",
+        { question: z.string().describe("The question, with just enough context to answer it") },
+        async ({ question }) => {
+          const qId = insertQuestion(db, runId, question);
+          setRunStatus(db, runId, "waiting");
+          appendRunLog(db, runId, `\n❓ asked owner: ${question}\n`);
+          audit(db, "run.asked", `run #${runId}: ${question.slice(0, 120)}`);
+          const deadline = Date.now() + 2 * 60 * 60 * 1000;
+          while (Date.now() < deadline) {
+            await sleep(2000);
+            const q = getQuestion(db, qId);
+            if (q?.answer) {
+              setRunStatus(db, runId, "running");
+              appendRunLog(db, runId, `✔ owner answered: ${q.answer}\n`);
+              return { content: [{ type: "text" as const, text: q.answer }] };
+            }
+          }
+          setRunStatus(db, runId, "running");
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "(no answer after 2h — proceed with your best judgment on the reversible parts, skip the irreversible ones, and flag this question in your final report)",
+              },
+            ],
+          };
+        },
+      ),
+    ],
+  });
+}
 
 function workPrompt(config: Config, profile: string, item: InboxItem | null, instructions: string): string {
   const workspaces = config.workspaces.length
@@ -46,12 +95,12 @@ THE TASK:
 ${item ? `From the inbox: ${item.title}\n${item.summary}\n${item.body ?? ""}\n${item.url ?? ""}` : ""}
 ${instructions}
 
-Work it end-to-end without asking permission for reversible steps. Verify what you build (run the tests; say the numbers). Then END with a report in exactly this shape:
+Work it end-to-end without asking permission for reversible steps. The moment you hit a decision only the owner can make — a scope call, a risky choice, missing information — call the ask_owner tool and continue with their answer; do not guess and do not batch real decisions to the end. Verify what you build (run the tests; say the numbers). Then END with a report in exactly this shape:
 
 ## What I did
 ## What I verified
 ## Decisions needed
-(numbered questions ONLY a human should answer; empty if none)
+(anything still open; empty if none)
 ## Drafts
 (any replies/comments to send, each labeled with its destination — these wait for the owner's yes)`;
 }
@@ -73,6 +122,7 @@ async function drive(
         resume: resumeSessionId ?? undefined,
         permissionMode: "bypassPermissions",
         settingSources: ["project"],
+        mcpServers: { standin: ownerTools(db, runId) },
       },
     });
     let lastText = "";

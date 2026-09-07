@@ -86,7 +86,13 @@ textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .run .rtitle{font-family:"Schibsted Grotesk",sans-serif;font-weight:700;font-size:15.5px;flex:1;min-width:200px}
 .rpill{font:500 11px "IBM Plex Mono",monospace;letter-spacing:.07em;text-transform:uppercase;border-radius:999px;padding:4px 10px;border:1px solid var(--line);color:var(--muted)}
 .rpill.running{border-color:var(--accent);color:var(--accent-ink);animation:pulse 1.4s ease-in-out infinite}
+.rpill.waiting{border-color:var(--signal);color:var(--signal);animation:pulse 1.4s ease-in-out infinite}
 .rpill.failed{border-color:var(--signal);color:var(--signal)}
+.question{border:1px solid var(--signal);background:var(--signal-soft);border-radius:8px;padding:12px 15px;display:flex;flex-direction:column;gap:8px}
+.question .qtext{font-weight:600;font-size:15px}
+#new-task{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+#new-task input{flex:1;min-width:240px;background:var(--mono-bg);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:9px 13px;font:400 14.5px "Source Sans 3",sans-serif}
+#new-task input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 @keyframes pulse{50%{opacity:.45}}
 @media (prefers-reduced-motion: reduce){.rpill.running{animation:none}}
 .rlog{background:var(--mono-bg);border-radius:8px;padding:10px 14px;font:400 12.5px/1.6 "IBM Plex Mono",monospace;max-height:180px;overflow:auto;white-space:pre-wrap;color:var(--muted)}
@@ -119,8 +125,12 @@ textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   <ul id="noise-list"></ul>
   <div id="queue-anchor"></div>
   <div id="queue"></div>
-  <section id="work" hidden>
+  <section id="work">
     <h2>Work</h2>
+    <form id="new-task">
+      <input id="task-input" placeholder="give an agent a task — “rebase lucia/reach-engagement carefully onto main”, “investigate the OOM in AIS-4670”…">
+      <button class="primary" type="submit">Run agent</button>
+    </form>
     <div id="runs"></div>
   </section>
 </div>
@@ -392,6 +402,17 @@ async function toggleYolo() {
   yoloOn = on;
   renderYolo();
 }
+$("#new-task").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = $("#task-input");
+  const instructions = input.value.trim();
+  if (!instructions) return;
+  if (!yoloOn) { alert("Flip the yolo switch first — agents need your go-ahead to work."); return; }
+  input.value = "";
+  try { await api("/api/work", { instructions }); await loadRuns(); }
+  catch (err) { alert(err.message); }
+});
+
 $("#yolo").addEventListener("click", toggleYolo);
 $("#yolo").addEventListener("keydown", e => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggleYolo(); } });
 
@@ -399,21 +420,42 @@ $("#yolo").addEventListener("keydown", e => { if (e.key === " " || e.key === "En
 let runsTimer = null;
 async function loadRuns() {
   const { runs } = await api("/api/runs");
-  $("#work").hidden = runs.length === 0;
   const box = $("#runs");
   box.replaceChildren(...runs.map(runCard));
-  const anyRunning = runs.some(r => r.status === "running");
+  const anyActive = runs.some(r => r.status === "running" || r.status === "waiting");
   clearTimeout(runsTimer);
-  if (anyRunning) runsTimer = setTimeout(loadRuns, 3000);
+  if (anyActive) runsTimer = setTimeout(loadRuns, 3000);
 }
+const PILL = { running: "working…", waiting: "needs you", done: "done", failed: "failed" };
 function runCard(r) {
   const el = document.createElement("div");
   el.className = "run";
   const head = document.createElement("div");
   head.className = "head";
-  head.innerHTML = `<span class="rtitle">${esc(r.title)}</span><span class="rpill ${r.status}">${r.status === "running" ? "working…" : r.status}</span>`;
+  head.innerHTML = `<span class="rtitle">${esc(r.title)}</span><span class="rpill ${r.status}">${PILL[r.status] ?? r.status}</span>`;
   el.append(head);
-  if (r.status === "running" && r.log) {
+  if (r.status === "waiting" && r.question) {
+    const qEl = document.createElement("div");
+    qEl.className = "question";
+    const form = document.createElement("form");
+    form.className = "ask";
+    const input = document.createElement("input");
+    input.placeholder = "your answer — the agent continues the moment you send it";
+    const send = mkBtn("Answer", "primary", () => {});
+    send.type = "submit";
+    form.append(input, send);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!input.value.trim()) return;
+      send.disabled = true;
+      try { await api(`/api/questions/${r.question.id}/answer`, { answer: input.value }); await loadRuns(); }
+      catch (err) { alert(err.message); send.disabled = false; }
+    });
+    qEl.innerHTML = `<span class="qtext">❓ ${esc(r.question.question)}</span>`;
+    qEl.append(form);
+    el.append(qEl);
+  }
+  if ((r.status === "running" || r.status === "waiting") && r.log) {
     const log = document.createElement("div");
     log.className = "rlog";
     log.textContent = r.log.slice(-3000);

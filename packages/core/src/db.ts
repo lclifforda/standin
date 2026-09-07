@@ -66,6 +66,14 @@ export function openDb(path: string): DB {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS questions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id INTEGER NOT NULL REFERENCES runs(id),
+      question TEXT NOT NULL,
+      answer TEXT,
+      created_at TEXT NOT NULL,
+      answered_at TEXT
+    );
   `);
   return db;
 }
@@ -238,7 +246,7 @@ export interface WorkRun {
   id: number;
   itemId: number | null;
   title: string;
-  status: "running" | "done" | "failed";
+  status: "running" | "waiting" | "done" | "failed";
   log: string;
   report: string | null;
   sessionId: string | null;
@@ -295,6 +303,67 @@ export function markRunResumed(db: DB, id: number): void {
     new Date().toISOString(),
     id,
   );
+}
+
+export function setRunStatus(db: DB, id: number, status: WorkRun["status"]): void {
+  db.prepare("UPDATE runs SET status = ?, updated_at = ? WHERE id = ?").run(
+    status,
+    new Date().toISOString(),
+    id,
+  );
+}
+
+// --- owner questions (an agent mid-run asks; the owner answers in the UI) ---
+
+export interface OwnerQuestion {
+  id: number;
+  runId: number;
+  question: string;
+  answer: string | null;
+  createdAt: string;
+  answeredAt: string | null;
+}
+
+function rowToQuestion(r: Record<string, unknown>): OwnerQuestion {
+  return {
+    id: r.id as number,
+    runId: r.run_id as number,
+    question: r.question as string,
+    answer: (r.answer as string) ?? null,
+    createdAt: r.created_at as string,
+    answeredAt: (r.answered_at as string) ?? null,
+  };
+}
+
+export function insertQuestion(db: DB, runId: number, question: string): number {
+  const res = db
+    .prepare("INSERT INTO questions (run_id, question, created_at) VALUES (?, ?, ?)")
+    .run(runId, question, new Date().toISOString());
+  return Number(res.lastInsertRowid);
+}
+
+export function getQuestion(db: DB, id: number): OwnerQuestion | null {
+  const r = db.prepare("SELECT * FROM questions WHERE id = ?").get(id) as
+    | Record<string, unknown>
+    | undefined;
+  return r ? rowToQuestion(r) : null;
+}
+
+export function answerQuestion(db: DB, id: number, answer: string): void {
+  db.prepare("UPDATE questions SET answer = ?, answered_at = ? WHERE id = ?").run(
+    answer,
+    new Date().toISOString(),
+    id,
+  );
+}
+
+export function pendingQuestion(db: DB, runId: number): OwnerQuestion | null {
+  const r = db
+    .prepare(
+      "SELECT * FROM questions WHERE run_id = ? AND answer IS NULL ORDER BY id ASC LIMIT 1",
+    )
+    .get(runId) as Record<string, unknown> | undefined;
+  return r ? rowToQuestion(r) : null;
 }
 
 export function getRun(db: DB, id: number): WorkRun | null {

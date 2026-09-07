@@ -42,6 +42,9 @@ importers:
       '@standin/core':
         specifier: workspace:*
         version: link:../core
+      zod:
+        specifier: ^4.5.4
+        version: 4.5.4
     devDependencies:
       tsx:
         specifier: ^4.19.0
