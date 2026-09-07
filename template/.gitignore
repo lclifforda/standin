@@ -1,0 +1,4 @@
+# Secrets and operational state never enter the brain's git history.
+.env
+secrets.json
+standin.db*

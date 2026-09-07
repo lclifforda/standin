@@ -53,6 +53,24 @@ textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 #noise-list{display:none;margin:0 0 24px;padding:14px 18px;background:var(--surface);border:1px solid var(--line);border-radius:10px;font-size:14px;color:var(--muted)}
 #noise-list.open{display:block}
 #noise-list li{margin:4px 0}
+/* connections */
+#conn-chips{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
+.chip{display:inline-flex;align-items:center;gap:7px;font:500 12px "IBM Plex Mono",monospace;border:1px solid var(--line);border-radius:999px;padding:5px 12px;background:var(--surface);cursor:pointer}
+.chip .dot{width:7px;height:7px;border-radius:50%;background:var(--signal);flex:none}
+.chip.on .dot{background:var(--accent)}
+#conn-panel{display:none;margin:0 0 26px;flex-direction:column;gap:10px}
+#conn-panel.open{display:flex}
+.conn{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 18px;display:flex;flex-direction:column;gap:8px}
+.conn .head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.conn .name{font-family:"Schibsted Grotesk",sans-serif;font-weight:700}
+.conn .who{font:500 12.5px "IBM Plex Mono",monospace;color:var(--accent-ink)}
+.conn .detail{font-size:13.5px;color:var(--muted)}
+.conn .detail a{color:var(--accent-ink)}
+.conn form{display:flex;gap:8px;flex-wrap:wrap}
+.conn input{flex:1;min-width:220px;background:var(--mono-bg);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:8px 12px;font:400 13px "IBM Plex Mono",monospace}
+.conn input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.conn .msg{font-size:13px;font-weight:600;color:var(--accent-ink)}
+.conn .msg.err{color:var(--signal)}
 </style>
 </head>
 <body>
@@ -64,7 +82,9 @@ textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   <div class="bar">
     <button class="primary" id="triage-btn">Run triage</button>
     <span class="quiet" id="quiet-line"></span>
+    <div id="conn-chips" title="connections — click to manage"></div>
   </div>
+  <div id="conn-panel"></div>
   <ul id="noise-list"></ul>
   <div id="queue"></div>
 </div>
@@ -167,6 +187,71 @@ async function load() {
   if (toggle) toggle.addEventListener("click", () => nl.classList.toggle("open"));
 }
 
+async function loadConnections() {
+  const { connections } = await api("/api/connections");
+  const chips = $("#conn-chips");
+  chips.replaceChildren(...connections.map(c => {
+    const chip = document.createElement("span");
+    chip.className = "chip" + (c.connected ? " on" : "");
+    chip.innerHTML = `<span class="dot"></span>${esc(c.name)}`;
+    chip.addEventListener("click", () => $("#conn-panel").classList.toggle("open"));
+    return chip;
+  }));
+  const panel = $("#conn-panel");
+  const wasOpen = panel.classList.contains("open");
+  panel.replaceChildren(...connections.map(connCard));
+  if (wasOpen) panel.classList.add("open");
+}
+
+function connCard(c) {
+  const el = document.createElement("div");
+  el.className = "conn";
+  const help = c.tokenHelpUrl ? ` <a href="${c.tokenHelpUrl}" target="_blank" rel="noopener">get a key →</a>` : "";
+  el.innerHTML = `
+    <div class="head">
+      <span class="name">${esc(c.name)}</span>
+      ${c.connected && c.who ? `<span class="who">✓ ${esc(c.who)}</span>` : ""}
+    </div>
+    <div class="detail">${esc(c.detail)}${c.connected ? "" : help}</div>`;
+  if (c.acceptsToken) {
+    if (!c.connected) {
+      const form = document.createElement("form");
+      const input = document.createElement("input");
+      input.type = "password";
+      input.placeholder = c.id === "linear" ? "lin_api_…" : "xoxb-…";
+      input.autocomplete = "off";
+      const btn = mkBtn("Connect", "primary", () => {});
+      btn.type = "submit";
+      const msg = document.createElement("span");
+      msg.className = "msg";
+      form.append(input, btn, msg);
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        btn.disabled = true; msg.className = "msg"; msg.textContent = "checking with " + c.name + "…";
+        try {
+          const r = await api(`/api/connections/${c.id}`, { token: input.value });
+          msg.textContent = "connected as " + r.who;
+          await loadConnections();
+        } catch (err) {
+          msg.className = "msg err";
+          msg.textContent = err.message + " — nothing was saved";
+          btn.disabled = false;
+        }
+      });
+      el.append(form);
+    } else {
+      const row = document.createElement("div");
+      row.className = "actions";
+      row.append(mkBtn("Disconnect", "", async () => {
+        await fetch(`/api/connections/${c.id}`, { method: "DELETE" });
+        await loadConnections();
+      }));
+      el.append(row);
+    }
+  }
+  return el;
+}
+
 $("#triage-btn").addEventListener("click", async () => {
   const b = $("#triage-btn");
   b.disabled = true; b.textContent = "Reading your inbox…";
@@ -176,6 +261,7 @@ $("#triage-btn").addEventListener("click", async () => {
 });
 
 load();
+loadConnections();
 </script>
 </body>
 </html>

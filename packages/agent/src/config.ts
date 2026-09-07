@@ -5,6 +5,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { readSecrets } from "./secrets.ts";
 
 export interface Config {
   brainDir: string;
@@ -36,11 +37,14 @@ export function loadConfig(brainDirArg?: string): Config {
   const cfgPath = join(brainDir, "standin.config.json");
   if (existsSync(cfgPath)) fileCfg = JSON.parse(readFileSync(cfgPath, "utf8"));
 
+  // Secrets saved by the Connections UI; env vars still override (containers).
+  const secrets = readSecrets(brainDir);
+
   return {
     brainDir,
     dbPath: join(brainDir, "standin.db"),
     model: process.env.STANDIN_MODEL ?? fileCfg.model,
-    linearApiKey: process.env.LINEAR_API_KEY,
-    slackBotToken: process.env.SLACK_BOT_TOKEN,
+    linearApiKey: process.env.LINEAR_API_KEY ?? secrets.linearApiKey,
+    slackBotToken: process.env.SLACK_BOT_TOKEN ?? secrets.slackBotToken,
   };
 }

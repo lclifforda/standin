@@ -24,11 +24,24 @@ import {
   updateItemDraft,
   withBody,
 } from "@standin/core";
-import { buildExecutors, loadConfig, runTriage } from "@standin/agent";
+import {
+  buildExecutors,
+  connectWithToken,
+  disconnect,
+  listConnections,
+  loadConfig,
+  runTriage,
+} from "@standin/agent";
 
-const config = loadConfig(process.env.STANDIN_BRAIN);
+let config = loadConfig(process.env.STANDIN_BRAIN);
 const db = openDb(config.dbPath);
-const executors = buildExecutors(config);
+let executors = buildExecutors(config);
+
+/** Re-read secrets after the Connections UI changes them — no restart needed. */
+function refreshConfig(): void {
+  config = loadConfig(process.env.STANDIN_BRAIN);
+  executors = buildExecutors(config);
+}
 const htmlPath = join(dirname(fileURLToPath(import.meta.url)), "..", "public", "index.html");
 const PORT = Number(process.env.STANDIN_PORT ?? 4180);
 
@@ -64,6 +77,29 @@ const server = createServer(async (req, res) => {
       });
     } else if (req.method === "GET" && url.pathname === "/api/audit") {
       json(res, 200, { events: listAudit(db) });
+    } else if (req.method === "GET" && url.pathname === "/api/connections") {
+      json(res, 200, { connections: await listConnections(config) });
+    } else if (
+      req.method === "POST" &&
+      (url.pathname === "/api/connections/linear" || url.pathname === "/api/connections/slack")
+    ) {
+      const id = url.pathname.endsWith("linear") ? ("linear" as const) : ("slack" as const);
+      const body = await readBody(req);
+      if (typeof body.token !== "string") return json(res, 400, { error: "token required" });
+      // Validated against the live API before storing — a bad key never saves.
+      const who = await connectWithToken(config.brainDir, id, body.token);
+      refreshConfig();
+      audit(db, "connector.linked", `${id} connected as ${who}`);
+      json(res, 200, { ok: true, who });
+    } else if (
+      req.method === "DELETE" &&
+      (url.pathname === "/api/connections/linear" || url.pathname === "/api/connections/slack")
+    ) {
+      const id = url.pathname.endsWith("linear") ? ("linear" as const) : ("slack" as const);
+      disconnect(config.brainDir, id);
+      refreshConfig();
+      audit(db, "connector.unlinked", `${id} disconnected`);
+      json(res, 200, { ok: true });
     } else if (req.method === "POST" && url.pathname === "/api/triage") {
       const r = await runTriage(config);
       json(res, 200, r);
