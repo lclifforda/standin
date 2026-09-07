@@ -128,6 +128,29 @@ export async function ingestLinearOAuth(): Promise<RawItem[]> {
   }, 60_000);
 }
 
+/** Issue + comments via MCP tool discovery, for the ask/chat context. */
+export async function getIssueContextOAuth(identifier: string): Promise<string> {
+  return withLinear(async (client) => {
+    const { tools } = await client.listTools();
+    const parts: string[] = [];
+    const issueTool = tools.find((t) => /^get_issue$|(^|_)issue$/i.test(t.name));
+    if (issueTool) {
+      const r = await client.callTool({ name: issueTool.name, arguments: { id: identifier } });
+      parts.push(textOf(r));
+    }
+    const commentsTool = tools.find((t) => /list_comments/i.test(t.name));
+    if (commentsTool) {
+      const r = await client.callTool({
+        name: commentsTool.name,
+        arguments: { issueId: identifier },
+      });
+      parts.push("COMMENTS:\n" + textOf(r));
+    }
+    if (parts.length === 0) throw new Error("Linear MCP exposes no issue/comments tools");
+    return parts.join("\n\n");
+  }, 60_000);
+}
+
 export async function sendLinearCommentOAuth(issueId: string, body: string): Promise<string> {
   return withLinear(async (client) => {
     const { tools } = await client.listTools();

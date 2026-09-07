@@ -29,6 +29,7 @@ import {
   withBody,
 } from "@standin/core";
 import {
+  askAboutItem,
   buildExecutors,
   connectLinearOAuth,
   connectWithToken,
@@ -65,7 +66,7 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
-  const itemAction = url.pathname.match(/^\/api\/items\/(\d+)\/(approve|dismiss|noise)$/);
+  const itemAction = url.pathname.match(/^\/api\/items\/(\d+)\/(approve|dismiss|noise|ask)$/);
 
   try {
     if (req.method === "GET" && url.pathname === "/") {
@@ -152,6 +153,12 @@ const server = createServer(async (req, res) => {
       if (!item) return json(res, 404, { error: `no item #${id}` });
       const body = await readBody(req);
 
+      if (verb === "ask") {
+        if (typeof body.question !== "string" || !body.question.trim())
+          return json(res, 400, { error: "question required" });
+        const answer = await askAboutItem(db, config, id, body.question.trim());
+        return json(res, 200, { answer });
+      }
       if (verb === "approve") {
         if (!item.action) return json(res, 400, { error: "item has no drafted action" });
         let action = item.action;

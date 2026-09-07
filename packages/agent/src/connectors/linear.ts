@@ -59,6 +59,46 @@ export async function ingestLinear(apiKey: string, unreadOnly = true): Promise<R
     }));
 }
 
+/** Full issue context (description, state, people, comments) for ask/chat. */
+export async function getIssueContext(apiKey: string, identifier: string): Promise<string> {
+  const data = await gql<{
+    issue: {
+      identifier: string;
+      title: string;
+      description: string | null;
+      url: string;
+      state: { name: string };
+      assignee: { name: string } | null;
+      creator: { name: string } | null;
+      comments: { nodes: { body: string; createdAt: string; user: { name: string } | null }[] };
+    };
+  }>(
+    apiKey,
+    `query($id: String!) {
+      issue(id: $id) {
+        identifier title description url
+        state { name }
+        assignee { name }
+        creator { name }
+        comments(first: 25) { nodes { body createdAt user { name } } }
+      }
+    }`,
+    { id: identifier },
+  );
+  const i = data.issue;
+  const comments = i.comments.nodes
+    .map((c) => `--- ${c.user?.name ?? "someone"} (${c.createdAt}):\n${c.body}`)
+    .join("\n\n");
+  return `${i.identifier}: ${i.title} [${i.state.name}]
+assignee: ${i.assignee?.name ?? "none"} · created by: ${i.creator?.name ?? "unknown"} · ${i.url}
+
+DESCRIPTION:
+${i.description ?? "(none)"}
+
+COMMENTS (newest last):
+${comments || "(none)"}`;
+}
+
 /** Resolve an issue identifier like "ABC-123" to its UUID for mutations. */
 async function issueUuid(apiKey: string, identifier: string): Promise<string> {
   const data = await gql<{ issue: { id: string } }>(
