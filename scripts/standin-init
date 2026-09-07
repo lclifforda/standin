@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# standin-init — set up a new person's stand-in brain from the template.
+# Usage: scripts/standin-init [target-dir]   (default: ~/standin-data)
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TARGET="${1:-$HOME/standin-data}"
+
+bold() { printf '\033[1m%s\033[0m\n' "$*"; }
+ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
+warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
+
+bold "standin-init → $TARGET"
+
+if [ -e "$TARGET" ] && [ -n "$(ls -A "$TARGET" 2>/dev/null)" ]; then
+  echo "Refusing to overwrite: $TARGET exists and is not empty." >&2
+  echo "Pick another dir: scripts/standin-init <dir>" >&2
+  exit 1
+fi
+
+mkdir -p "$TARGET"
+cp -R "$REPO_DIR/template/." "$TARGET/"
+
+# The brain gets its own git history: free persistence + rollback of the clone's memory.
+if command -v git >/dev/null 2>&1; then
+  git -C "$TARGET" init -q
+  git -C "$TARGET" add -A
+  git -C "$TARGET" commit -qm "standin: fresh brain from template" || true
+  ok "brain initialized with git history"
+else
+  warn "git not found — brain created without version history"
+fi
+
+bold "Environment checks"
+
+if command -v claude >/dev/null 2>&1; then
+  ok "Claude Code installed ($(claude --version 2>/dev/null | head -1 || echo 'version unknown'))"
+else
+  warn "Claude Code not found → install: npm install -g @anthropic-ai/claude-code"
+  warn "  (first run of 'claude' will walk you through login — subscription or API key)"
+fi
+
+if command -v gh >/dev/null 2>&1; then
+  if gh auth status >/dev/null 2>&1; then
+    ok "GitHub CLI authenticated"
+  else
+    warn "GitHub CLI installed but not logged in → run: gh auth login"
+  fi
+else
+  warn "GitHub CLI not found → install: brew install gh   then: gh auth login"
+fi
+
+bold "Next steps"
+cat <<EOF
+  1. Connect your tools (Linear, Slack, ...) — see $TARGET/connectors/CONNECTORS.md
+  2. cd $TARGET && claude
+  3. Say: "onboard me"            (5-minute interview → your profile)
+  4. Say: "train on my voice"     (learns from your real messages)
+  5. Say: "triage my inbox"       (watch your inbox collapse to what matters)
+
+The two rules that never bend: it never sends a message and never merges/closes
+anything without your explicit yes. Everything else it does for you.
+EOF
