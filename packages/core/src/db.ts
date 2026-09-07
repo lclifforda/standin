@@ -51,6 +51,21 @@ export function openDb(path: string): DB {
       approval_id TEXT,
       detail TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id INTEGER,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running',
+      log TEXT NOT NULL DEFAULT '',
+      report TEXT,
+      session_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
   return db;
 }
@@ -200,6 +215,100 @@ export function audit(
   db.prepare(
     "INSERT INTO audit (ts, type, item_id, approval_id, detail) VALUES (?, ?, ?, ?, ?)",
   ).run(new Date().toISOString(), type, ids.itemId ?? null, ids.approvalId ?? null, detail);
+}
+
+// --- settings (tiny kv: yolo toggle & co) ---
+
+export function getSetting(db: DB, key: string): string | null {
+  const r = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
+    | { value: string }
+    | undefined;
+  return r?.value ?? null;
+}
+
+export function setSetting(db: DB, key: string, value: string): void {
+  db.prepare(
+    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+  ).run(key, value);
+}
+
+// --- work runs (yolo mode executions) ---
+
+export interface WorkRun {
+  id: number;
+  itemId: number | null;
+  title: string;
+  status: "running" | "done" | "failed";
+  log: string;
+  report: string | null;
+  sessionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function rowToRun(r: Record<string, unknown>): WorkRun {
+  return {
+    id: r.id as number,
+    itemId: (r.item_id as number) ?? null,
+    title: r.title as string,
+    status: r.status as WorkRun["status"],
+    log: r.log as string,
+    report: (r.report as string) ?? null,
+    sessionId: (r.session_id as string) ?? null,
+    createdAt: r.created_at as string,
+    updatedAt: r.updated_at as string,
+  };
+}
+
+export function insertRun(db: DB, itemId: number | null, title: string): number {
+  const now = new Date().toISOString();
+  const res = db
+    .prepare(
+      "INSERT INTO runs (item_id, title, status, created_at, updated_at) VALUES (?, ?, 'running', ?, ?)",
+    )
+    .run(itemId, title, now, now);
+  return Number(res.lastInsertRowid);
+}
+
+export function appendRunLog(db: DB, id: number, chunk: string): void {
+  db.prepare("UPDATE runs SET log = log || ?, updated_at = ? WHERE id = ?").run(
+    chunk,
+    new Date().toISOString(),
+    id,
+  );
+}
+
+export function finishRun(
+  db: DB,
+  id: number,
+  status: "done" | "failed",
+  report: string | null,
+  sessionId: string | null,
+): void {
+  db.prepare(
+    "UPDATE runs SET status = ?, report = ?, session_id = ?, updated_at = ? WHERE id = ?",
+  ).run(status, report, sessionId, new Date().toISOString(), id);
+}
+
+export function markRunResumed(db: DB, id: number): void {
+  db.prepare("UPDATE runs SET status = 'running', updated_at = ? WHERE id = ?").run(
+    new Date().toISOString(),
+    id,
+  );
+}
+
+export function getRun(db: DB, id: number): WorkRun | null {
+  const r = db.prepare("SELECT * FROM runs WHERE id = ?").get(id) as
+    | Record<string, unknown>
+    | undefined;
+  return r ? rowToRun(r) : null;
+}
+
+export function listRuns(db: DB, limit = 30): WorkRun[] {
+  const rows = db
+    .prepare("SELECT * FROM runs ORDER BY id DESC LIMIT ?")
+    .all(limit) as Record<string, unknown>[];
+  return rows.map(rowToRun);
 }
 
 export function listAudit(db: DB, limit = 200): AuditEvent[] {

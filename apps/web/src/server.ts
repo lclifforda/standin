@@ -15,12 +15,16 @@ import {
   audit,
   executeApproved,
   getItem,
+  getRun,
+  getSetting,
   laneCounts,
   listAudit,
   listItems,
+  listRuns,
   mintApproval,
   openDb,
   setItemStatus,
+  setSetting,
   updateItemDraft,
   withBody,
 } from "@standin/core";
@@ -28,10 +32,12 @@ import {
   buildExecutors,
   connectLinearOAuth,
   connectWithToken,
+  continueWorkRun,
   disconnect,
   listConnections,
   loadConfig,
   runTriage,
+  startWorkRun,
 } from "@standin/agent";
 
 let config = loadConfig(process.env.STANDIN_BRAIN);
@@ -78,6 +84,34 @@ const server = createServer(async (req, res) => {
       });
     } else if (req.method === "GET" && url.pathname === "/api/audit") {
       json(res, 200, { events: listAudit(db) });
+    } else if (req.method === "GET" && url.pathname === "/api/yolo") {
+      json(res, 200, { on: getSetting(db, "yolo") === "on", workspaces: config.workspaces });
+    } else if (req.method === "POST" && url.pathname === "/api/yolo") {
+      const body = await readBody(req);
+      setSetting(db, "yolo", body.on ? "on" : "off");
+      audit(db, "yolo.toggled", body.on ? "yolo mode ON" : "yolo mode OFF");
+      json(res, 200, { on: body.on === true });
+    } else if (req.method === "GET" && url.pathname === "/api/runs") {
+      json(res, 200, { runs: listRuns(db) });
+    } else if (req.method === "GET" && url.pathname.match(/^\/api\/runs\/\d+$/)) {
+      const run = getRun(db, Number(url.pathname.split("/")[3]));
+      run ? json(res, 200, { run }) : json(res, 404, { error: "no such run" });
+    } else if (req.method === "POST" && url.pathname.match(/^\/api\/runs\/\d+\/continue$/)) {
+      const id = Number(url.pathname.split("/")[3]);
+      const body = await readBody(req);
+      if (typeof body.answer !== "string" || !body.answer.trim())
+        return json(res, 400, { error: "answer required" });
+      continueWorkRun(db, config, id, body.answer.trim());
+      json(res, 200, { ok: true });
+    } else if (req.method === "POST" && url.pathname === "/api/work") {
+      if (getSetting(db, "yolo") !== "on")
+        return json(res, 403, { error: "yolo mode is off — flip the switch to let me do the work" });
+      const body = await readBody(req);
+      const runId = startWorkRun(db, config, {
+        itemId: typeof body.itemId === "number" ? body.itemId : undefined,
+        instructions: typeof body.instructions === "string" ? body.instructions : undefined,
+      });
+      json(res, 200, { ok: true, runId });
     } else if (req.method === "GET" && url.pathname === "/api/connections") {
       json(res, 200, { connections: await listConnections(config) });
     } else if (req.method === "POST" && url.pathname === "/api/connections/linear-oauth") {

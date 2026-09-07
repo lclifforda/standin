@@ -9,3 +9,4 @@ export {
   disconnect,
   type ConnectionStatus,
 } from "./connections.ts";
+export { startWorkRun, continueWorkRun } from "./work.ts";

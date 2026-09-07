@@ -11,6 +11,7 @@ export interface Config {
   brainDir: string;
   dbPath: string;
   model: string | undefined;
+  workspaces: string[]; // repo checkouts yolo mode may work in
   linearApiKey: string | undefined;
   linearMcp: boolean; // connected keylessly via Linear's official MCP (OAuth)
   slackBotToken: string | undefined;
@@ -34,17 +35,22 @@ export function loadConfig(brainDirArg?: string): Config {
     throw new Error(`brain dir not found: ${brainDir} — run scripts/standin-init first`);
   loadDotEnv(join(brainDir, ".env"));
 
-  let fileCfg: Record<string, string> = {};
+  let fileCfg: { model?: string; workspaces?: string[] } = {};
   const cfgPath = join(brainDir, "standin.config.json");
   if (existsSync(cfgPath)) fileCfg = JSON.parse(readFileSync(cfgPath, "utf8"));
 
   // Secrets saved by the Connections UI; env vars still override (containers).
   const secrets = readSecrets(brainDir);
 
+  const workspaces = (fileCfg.workspaces ?? [])
+    .map((w) => resolve(w.replace(/^~(?=\/|$)/, homedir())))
+    .filter((w) => existsSync(w));
+
   return {
     brainDir,
     dbPath: join(brainDir, "standin.db"),
     model: process.env.STANDIN_MODEL ?? fileCfg.model,
+    workspaces,
     linearApiKey: process.env.LINEAR_API_KEY ?? secrets.linearApiKey,
     linearMcp: secrets.linearMcp === "true",
     slackBotToken: process.env.SLACK_BOT_TOKEN ?? secrets.slackBotToken,

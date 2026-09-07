@@ -1,0 +1,6 @@
+{
+  "workspaces": [
+    "~/repos/your-main-repo",
+    "~/repos/another-repo-the-standin-may-work-in"
+  ]
+}

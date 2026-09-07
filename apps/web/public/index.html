@@ -71,6 +71,28 @@ textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .conn input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .conn .msg{font-size:13px;font-weight:600;color:var(--accent-ink)}
 .conn .msg.err{color:var(--signal)}
+/* yolo toggle */
+.yolo{display:inline-flex;align-items:center;gap:9px;font:600 13px "Source Sans 3",sans-serif;color:var(--muted);cursor:pointer;user-select:none}
+.yolo .track{width:38px;height:21px;border-radius:999px;background:var(--line);position:relative;transition:background .15s}
+.yolo .knob{position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:var(--surface);box-shadow:0 1px 2px rgba(0,0,0,.25);transition:left .15s}
+.yolo.on{color:var(--accent-ink)}
+.yolo.on .track{background:var(--accent)}
+.yolo.on .knob{left:19px}
+/* work runs */
+#work{margin-top:44px}
+#work h2{font-family:"Schibsted Grotesk",sans-serif;font-weight:700;font-size:20px;margin:0 0 12px}
+.run{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:12px;display:flex;flex-direction:column;gap:9px}
+.run .head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.run .rtitle{font-family:"Schibsted Grotesk",sans-serif;font-weight:700;font-size:15.5px;flex:1;min-width:200px}
+.rpill{font:500 11px "IBM Plex Mono",monospace;letter-spacing:.07em;text-transform:uppercase;border-radius:999px;padding:4px 10px;border:1px solid var(--line);color:var(--muted)}
+.rpill.running{border-color:var(--accent);color:var(--accent-ink);animation:pulse 1.4s ease-in-out infinite}
+.rpill.failed{border-color:var(--signal);color:var(--signal)}
+@keyframes pulse{50%{opacity:.45}}
+@media (prefers-reduced-motion: reduce){.rpill.running{animation:none}}
+.rlog{background:var(--mono-bg);border-radius:8px;padding:10px 14px;font:400 12.5px/1.6 "IBM Plex Mono",monospace;max-height:180px;overflow:auto;white-space:pre-wrap;color:var(--muted)}
+.rreport{font-size:15px;white-space:pre-wrap;border-left:3px solid var(--accent);padding-left:14px}
+.run form{display:flex;flex-direction:column;gap:8px}
+.run textarea{min-height:64px}
 </style>
 </head>
 <body>
@@ -83,10 +105,18 @@ textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
     <button class="primary" id="triage-btn">Run triage</button>
     <span class="quiet" id="quiet-line"></span>
     <div id="conn-chips" title="connections — click to manage"></div>
+    <span class="yolo" id="yolo" role="switch" aria-checked="false" tabindex="0" title="yolo mode: I do the rote work end-to-end; you keep decisions, sends and merges">
+      <span class="track"><span class="knob"></span></span>yolo
+    </span>
   </div>
   <div id="conn-panel"></div>
   <ul id="noise-list"></ul>
+  <div id="queue-anchor"></div>
   <div id="queue"></div>
+  <section id="work" hidden>
+    <h2>Work</h2>
+    <div id="runs"></div>
+  </section>
 </div>
 <script>
 const $ = (s, el=document) => el.querySelector(s);
@@ -122,15 +152,32 @@ function card(item) {
         done(el, "✓ " + r.note);
       } catch (e) { fail(el, e); approve.disabled = false; }
     });
-    actions.append(approve, dismissBtn(item, el), noiseBtn(item, el));
+    actions.append(approve, workBtn(item), dismissBtn(item, el), noiseBtn(item, el));
     el.append(actions);
   } else {
     const actions = document.createElement("div");
     actions.className = "actions";
-    actions.append(dismissBtn(item, el, "Seen — clear it"), noiseBtn(item, el));
+    actions.append(workBtn(item), dismissBtn(item, el, "Seen — clear it"), noiseBtn(item, el));
     el.append(actions);
   }
   return el;
+}
+
+let yoloOn = false;
+function workBtn(item) {
+  const b = mkBtn("Go do it", "", async () => {
+    if (!yoloOn) { alert("Flip the yolo switch first — then I do the work end-to-end."); return; }
+    b.disabled = true; b.textContent = "On it…";
+    try {
+      await api("/api/work", { itemId: item.id });
+      await loadRuns();
+      document.querySelector("#work").scrollIntoView({ behavior: "smooth" });
+    } catch (e) { alert(e.message); b.disabled = false; b.textContent = "Go do it"; }
+  });
+  b.title = "yolo: branch, code, test, push — then a report with the decisions that need you";
+  if (!yoloOn) b.hidden = true;
+  b.dataset.work = "1";
+  return b;
 }
 
 function mkBtn(text, cls, onclick) {
@@ -286,8 +333,80 @@ $("#triage-btn").addEventListener("click", async () => {
   finally { b.disabled = false; b.textContent = "Run triage"; }
 });
 
+// --- yolo toggle ---
+async function loadYolo() {
+  const { on } = await api("/api/yolo");
+  yoloOn = on;
+  renderYolo();
+}
+function renderYolo() {
+  const y = $("#yolo");
+  y.classList.toggle("on", yoloOn);
+  y.setAttribute("aria-checked", String(yoloOn));
+  document.querySelectorAll("[data-work]").forEach(b => b.hidden = !yoloOn);
+}
+async function toggleYolo() {
+  const { on } = await api("/api/yolo", { on: !yoloOn });
+  yoloOn = on;
+  renderYolo();
+}
+$("#yolo").addEventListener("click", toggleYolo);
+$("#yolo").addEventListener("keydown", e => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggleYolo(); } });
+
+// --- work runs ---
+let runsTimer = null;
+async function loadRuns() {
+  const { runs } = await api("/api/runs");
+  $("#work").hidden = runs.length === 0;
+  const box = $("#runs");
+  box.replaceChildren(...runs.map(runCard));
+  const anyRunning = runs.some(r => r.status === "running");
+  clearTimeout(runsTimer);
+  if (anyRunning) runsTimer = setTimeout(loadRuns, 3000);
+}
+function runCard(r) {
+  const el = document.createElement("div");
+  el.className = "run";
+  const head = document.createElement("div");
+  head.className = "head";
+  head.innerHTML = `<span class="rtitle">${esc(r.title)}</span><span class="rpill ${r.status}">${r.status === "running" ? "working…" : r.status}</span>`;
+  el.append(head);
+  if (r.status === "running" && r.log) {
+    const log = document.createElement("div");
+    log.className = "rlog";
+    log.textContent = r.log.slice(-3000);
+    el.append(log);
+    log.scrollTop = log.scrollHeight;
+  }
+  if (r.status !== "running" && r.report) {
+    const rep = document.createElement("div");
+    rep.className = "rreport";
+    rep.textContent = r.report;
+    el.append(rep);
+  }
+  if (r.status !== "running" && r.sessionId) {
+    const form = document.createElement("form");
+    const ta = document.createElement("textarea");
+    ta.placeholder = "answer its questions / tell it what to change — it picks up where it left off";
+    const send = mkBtn("Answer & continue", "primary", () => {});
+    send.type = "submit";
+    form.append(ta, send);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!ta.value.trim()) return;
+      send.disabled = true;
+      try { await api(`/api/runs/${r.id}/continue`, { answer: ta.value }); await loadRuns(); }
+      catch (err) { alert(err.message); send.disabled = false; }
+    });
+    el.append(form);
+  }
+  return el;
+}
+
 load();
 loadConnections();
+loadYolo();
+loadRuns();
 </script>
 </body>
 </html>
