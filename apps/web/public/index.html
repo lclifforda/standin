@@ -110,12 +110,18 @@ section{margin-top:46px}
 .empty{border:1px dashed var(--line);border-radius:12px;padding:44px 20px;text-align:center;color:var(--muted);font-size:15px}
 .empty b{color:var(--ink)}
 
-/* ask */
+/* per-card conversation */
 .ask{display:flex;gap:8px}
 .ask input{flex:1;padding:8px 13px}
-.answer{background:var(--raise);border:1px solid var(--line-soft);border-radius:10px;padding:11px 14px;font-size:14px;white-space:pre-wrap}
-.answer .q{font-weight:600;color:var(--accent-ink);display:block;margin-bottom:5px;font-size:13px}
 .askwrap{display:flex;flex-direction:column;gap:8px}
+.thread{display:flex;flex-direction:column;gap:6px}
+.bubble{max-width:88%;border-radius:12px;padding:9px 13px;font-size:14px;white-space:pre-wrap}
+.bubble.owner{align-self:flex-end;background:var(--accent-soft);border:1px solid var(--accent);border-radius:12px 12px 3px 12px}
+.bubble.standin{align-self:flex-start;background:var(--raise);border:1px solid var(--line-soft);border-radius:12px 12px 12px 3px}
+.bubble.pending{color:var(--muted);font-style:italic;animation:pulse 1.5s ease-in-out infinite}
+.bubble.failed{border-color:var(--signal);color:var(--signal-ink)}
+@media (prefers-reduced-motion: reduce){.bubble.pending{animation:none}}
+.rank{font:700 11px "IBM Plex Mono",monospace;color:var(--muted);letter-spacing:0}
 
 /* ---------- work ---------- */
 #new-task{display:flex;gap:8px;margin-bottom:16px}
@@ -238,15 +244,16 @@ async function load() {
     e.innerHTML = "<b>Queue clear.</b><br>Run triage to read your inbox again.";
     q.append(e);
   } else {
-    data.items.forEach(i => q.append(card(i)));
+    data.items.forEach((i, idx) => q.append(card(i, idx + 1)));
   }
 }
 
-function card(item) {
+function card(item, rank) {
   const el = document.createElement("div");
   el.className = "card lane" + item.lane;
   el.innerHTML = `
     <div class="meta">
+      <span class="rank">#${rank}</span>
       <span class="lane-tag">${item.lane === 4 ? "escalate now" : "needs you"}</span>
       <span>${esc(item.source)}</span>
       ${item.actor ? `<span>· ${esc(item.actor)}</span>` : ""}
@@ -331,33 +338,46 @@ function fail(el, e) {
 function askBox(item) {
   const wrap = document.createElement("div");
   wrap.className = "askwrap";
+  const thread = document.createElement("div");
+  thread.className = "thread";
   const form = document.createElement("form");
   form.className = "ask";
   const input = document.createElement("input");
-  input.placeholder = "ask about this — context, who's involved, your options…";
+  input.placeholder = "chat about this — context, who's involved, your options…";
   const btn = mkBtn("Ask", "ghost", () => {});
   btn.type = "submit";
   form.append(input, btn);
+  wrap.append(thread, form);
+
+  let pollTimer = null;
+  function render(chat) {
+    thread.replaceChildren(...chat.map(m => {
+      const b = document.createElement("div");
+      b.className = `bubble ${m.role}` + (m.status === "pending" ? " pending" : m.status === "failed" ? " failed" : "");
+      b.textContent = m.status === "pending" ? "pulling the live ticket and thinking…" :
+        (m.status === "failed" ? "failed: " + m.content : m.content);
+      return b;
+    }));
+    const pending = chat.some(m => m.status === "pending");
+    clearTimeout(pollTimer);
+    if (pending) pollTimer = setTimeout(poll, 2500);
+    return pending;
+  }
+  async function poll() {
+    try { render((await api(`/api/items/${item.id}/chat`)).chat); }
+    catch { /* card may be gone */ }
+  }
+  // reload-safe: the stored conversation renders immediately
+  render(item.chat ?? []);
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const question = input.value.trim();
     if (!question) return;
-    btn.disabled = true; btn.textContent = "Reading…";
-    const box = document.createElement("div");
-    box.className = "answer";
-    box.innerHTML = `<span class="q">${esc(question)}</span>pulling the live issue and thinking…`;
-    wrap.insertBefore(box, form);
-    try {
-      const r = await api(`/api/items/${item.id}/ask`, { question });
-      box.innerHTML = `<span class="q">${esc(question)}</span>` + esc(r.answer);
-      input.value = "";
-    } catch (err) {
-      box.innerHTML = `<span class="q">${esc(question)}</span>failed: ${esc(err.message)}`;
-    } finally {
-      btn.disabled = false; btn.textContent = "Ask";
-    }
+    input.value = "";
+    try { render((await api(`/api/items/${item.id}/ask`, { question })).chat); }
+    catch (err) { toast(err.message, "err"); }
   });
-  wrap.append(form);
   return wrap;
 }
 

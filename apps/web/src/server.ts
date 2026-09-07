@@ -19,7 +19,10 @@ import {
   getQuestion,
   getRun,
   getSetting,
+  insertChat,
+  listChats,
   pendingQuestion,
+  resolveChat,
   laneCounts,
   listAudit,
   listItems,
@@ -78,7 +81,10 @@ const server = createServer(async (req, res) => {
     } else if (req.method === "GET" && url.pathname === "/api/queue") {
       const counts = laneCounts(db);
       json(res, 200, {
-        items: listItems(db, { lanes: [3, 4] }),
+        items: listItems(db, { lanes: [3, 4] }).map((i) => ({
+          ...i,
+          chat: listChats(db, i.id),
+        })),
         quiet: counts[1] + counts[2],
         noise: listItems(db, { lanes: [1, 2] }).map((i) => ({
           id: i.id,
@@ -86,6 +92,8 @@ const server = createServer(async (req, res) => {
           summary: i.summary,
         })),
       });
+    } else if (req.method === "GET" && url.pathname.match(/^\/api\/items\/\d+\/chat$/)) {
+      json(res, 200, { chat: listChats(db, Number(url.pathname.split("/")[3])) });
     } else if (req.method === "GET" && url.pathname === "/api/audit") {
       json(res, 200, { events: listAudit(db) });
     } else if (req.method === "GET" && url.pathname === "/api/yolo") {
@@ -176,8 +184,18 @@ const server = createServer(async (req, res) => {
       if (verb === "ask") {
         if (typeof body.question !== "string" || !body.question.trim())
           return json(res, 400, { error: "question required" });
-        const answer = await askAboutItem(db, config, id, body.question.trim());
-        return json(res, 200, { answer });
+        const question = body.question.trim();
+        // Persist both sides immediately, answer asynchronously: the thread
+        // survives a reload even mid-answer, and the UI polls until resolved.
+        const history = listChats(db, id);
+        insertChat(db, id, "owner", question);
+        const pendingId = insertChat(db, id, "standin", "", "pending");
+        void askAboutItem(db, config, id, question, history)
+          .then((answer) => resolveChat(db, pendingId, answer, "done"))
+          .catch((err) =>
+            resolveChat(db, pendingId, String(err instanceof Error ? err.message : err), "failed"),
+          );
+        return json(res, 200, { ok: true, chat: listChats(db, id) });
       }
       if (verb === "approve") {
         if (!item.action) return json(res, 400, { error: "item has no drafted action" });

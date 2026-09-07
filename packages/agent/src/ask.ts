@@ -5,13 +5,41 @@
  * language. Read-only by construction: nothing here can send.
  */
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { getItem, loadBrain, type DB } from "@standin/core";
+import { getItem, loadBrain, type ChatMessage, type DB } from "@standin/core";
 import type { Config } from "./config.ts";
 import { getIssueContext } from "./connectors/linear.ts";
 import { getIssueContextOAuth } from "./connectors/linear-mcp.ts";
 
-function issueIdentifier(text: string): string | null {
-  return text.match(/\b[A-Z][A-Z0-9]+-\d+\b/)?.[0] ?? null;
+/**
+ * The ticket id usually lives in the item's URL (linear.app/<org>/issue/ABC-123/…),
+ * not its title — Linear notification titles carry the issue *title* only.
+ */
+export function issueIdentifier(item: {
+  title: string;
+  body: string | null;
+  url: string | null;
+}): string | null {
+  const fromUrl = item.url?.match(/\/issue\/([A-Z][A-Z0-9]*-\d+)/i)?.[1];
+  if (fromUrl) return fromUrl.toUpperCase();
+  return `${item.title} ${item.body ?? ""}`.match(/\b[A-Z][A-Z0-9]+-\d+\b/)?.[0] ?? null;
+}
+
+export async function fetchItemContext(config: Config, item: {
+  source: string;
+  title: string;
+  body: string | null;
+  url: string | null;
+}): Promise<string> {
+  if (item.source !== "linear") return "";
+  const identifier = issueIdentifier(item);
+  if (!identifier) return "";
+  try {
+    if (config.linearApiKey) return await getIssueContext(config.linearApiKey, identifier);
+    if (config.linearMcp) return await getIssueContextOAuth(identifier);
+    return `(Linear isn't connected — connect it to pull ${identifier} live)`;
+  } catch (err) {
+    return `(couldn't fetch ${identifier} live: ${String(err instanceof Error ? err.message : err)})`;
+  }
 }
 
 export async function askAboutItem(
@@ -19,26 +47,19 @@ export async function askAboutItem(
   config: Config,
   itemId: number,
   question: string,
+  history: ChatMessage[] = [],
 ): Promise<string> {
   const item = getItem(db, itemId);
   if (!item) throw new Error(`no item #${itemId}`);
   const brain = loadBrain(config.brainDir);
+  const sourceContext = await fetchItemContext(config, item);
 
-  let sourceContext = "";
-  if (item.source === "linear") {
-    const identifier = issueIdentifier(`${item.title} ${item.body ?? ""}`);
-    if (identifier) {
-      try {
-        if (config.linearApiKey)
-          sourceContext = await getIssueContext(config.linearApiKey, identifier);
-        else if (config.linearMcp) sourceContext = await getIssueContextOAuth(identifier);
-      } catch (err) {
-        sourceContext = `(couldn't fetch the live issue: ${String(err)})`;
-      }
-    }
-  }
+  const conversation = history
+    .filter((m) => m.status === "done" && m.content)
+    .map((m) => `${m.role === "owner" ? "OWNER" : "YOU"}: ${m.content}`)
+    .join("\n\n");
 
-  const prompt = `You are the owner's virtual stand-in. They are looking at ONE inbox item and asked a question about it. Answer plainly and concretely — who's involved, what happened, what their options are. Lead with the answer. Never invent facts; if the context doesn't say, say so. Do not send anything; you are read-only.
+  const prompt = `You are the owner's virtual stand-in. They are looking at ONE inbox item and chatting with you about it. Answer plainly and concretely — who's involved, what happened, what their options are. Lead with the answer. Never invent facts; if the context doesn't say, say so. Do not send anything; you are read-only.
 
 OWNER PROFILE (for what matters to them):
 ${brain.profile}
@@ -49,10 +70,11 @@ ${item.summary}
 ${item.body ?? ""}
 ${item.url ?? ""}
 
-LIVE SOURCE CONTEXT:
-${sourceContext || "(no live context available — answer from the item alone and say what's missing)"}
+LIVE SOURCE CONTEXT (the actual ticket, people, and comments):
+${sourceContext || "(no live context could be fetched — say so and answer from the item alone)"}
 
-OWNER'S QUESTION:
+${conversation ? `THE CONVERSATION SO FAR:\n${conversation}\n` : ""}
+OWNER'S NEW MESSAGE:
 ${question}`;
 
   const q = query({

@@ -30,7 +30,7 @@ import {
   type InboxItem,
 } from "@standin/core";
 import type { Config } from "./config.ts";
-import { getIssueContext } from "./connectors/linear.ts";
+import { fetchItemContext, issueIdentifier } from "./ask.ts";
 
 /**
  * The agent's line to its owner: calling ask_owner parks the run as "waiting",
@@ -122,9 +122,6 @@ THE REPORT (end with exactly this shape):
 (each labeled with its destination)`;
 }
 
-function issueIdentifier(text: string): string | null {
-  return text.match(/\b[A-Z][A-Z0-9]+-\d+\b/)?.[0] ?? null;
-}
 
 async function drive(
   db: DB,
@@ -204,17 +201,15 @@ export function startWorkRun(
   const runId = insertRun(db, item?.id ?? null, title);
   audit(db, "run.started", `yolo: ${title}`, { itemId: item?.id });
   void (async () => {
-    // PHASE 1 head start: pre-fetch the ticket so the gather phase begins
-    // with the full thread even when the agent has no Linear tools (key mode).
-    let sourceContext = "";
-    const identifier = issueIdentifier(
-      `${item?.title ?? ""} ${item?.body ?? ""} ${opts.instructions ?? ""}`,
-    );
-    if (identifier && config.linearApiKey) {
-      sourceContext = await getIssueContext(config.linearApiKey, identifier).catch(
-        (err) => `(couldn't pre-fetch ${identifier}: ${String(err)})`,
-      );
-    }
+    // PHASE 1 head start: pre-fetch the ticket (id parsed from the item URL or
+    // text) so the gather phase starts with the full thread in every auth mode.
+    const probe = item ?? {
+      source: "linear" as const,
+      title: opts.instructions ?? "",
+      body: null,
+      url: null,
+    };
+    const sourceContext = issueIdentifier(probe) ? await fetchItemContext(config, probe) : "";
     await drive(
       db,
       runId,

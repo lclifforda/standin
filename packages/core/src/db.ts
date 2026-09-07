@@ -74,6 +74,14 @@ export function openDb(path: string): DB {
       created_at TEXT NOT NULL,
       answered_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS chats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id INTEGER NOT NULL REFERENCES items(id),
+      role TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'done',
+      created_at TEXT NOT NULL
+    );
   `);
   return db;
 }
@@ -355,6 +363,57 @@ export function answerQuestion(db: DB, id: number, answer: string): void {
     new Date().toISOString(),
     id,
   );
+}
+
+// --- item chats (persistent per-card conversations with the stand-in) ---
+
+export interface ChatMessage {
+  id: number;
+  itemId: number;
+  role: "owner" | "standin";
+  content: string;
+  status: "done" | "pending" | "failed";
+  createdAt: string;
+}
+
+function rowToChat(r: Record<string, unknown>): ChatMessage {
+  return {
+    id: r.id as number,
+    itemId: r.item_id as number,
+    role: r.role as ChatMessage["role"],
+    content: r.content as string,
+    status: r.status as ChatMessage["status"],
+    createdAt: r.created_at as string,
+  };
+}
+
+export function insertChat(
+  db: DB,
+  itemId: number,
+  role: ChatMessage["role"],
+  content: string,
+  status: ChatMessage["status"] = "done",
+): number {
+  const res = db
+    .prepare("INSERT INTO chats (item_id, role, content, status, created_at) VALUES (?, ?, ?, ?, ?)")
+    .run(itemId, role, content, status, new Date().toISOString());
+  return Number(res.lastInsertRowid);
+}
+
+export function resolveChat(
+  db: DB,
+  id: number,
+  content: string,
+  status: "done" | "failed",
+): void {
+  db.prepare("UPDATE chats SET content = ?, status = ? WHERE id = ?").run(content, status, id);
+}
+
+export function listChats(db: DB, itemId: number): ChatMessage[] {
+  const rows = db
+    .prepare("SELECT * FROM chats WHERE item_id = ? ORDER BY id ASC")
+    .all(itemId) as Record<string, unknown>[];
+  return rows.map(rowToChat);
 }
 
 export function pendingQuestion(db: DB, runId: number): OwnerQuestion | null {
