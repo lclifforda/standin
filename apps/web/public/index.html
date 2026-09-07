@@ -4,138 +4,193 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Standin</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;700;800&family=Source+Sans+3:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🪞</text></svg>">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;700;800&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 :root{
-  --ground:#F5F7F4; --surface:#FFFFFF; --ink:#1B2320; --muted:#5C6A64;
-  --line:#DDE4DF; --accent:#0E7A5F; --accent-ink:#0A5C48; --accent-soft:#E3F0EA;
-  --signal:#BE4736; --signal-soft:#F7E7E3; --mono-bg:#EDF1EE;
+  --ground:#F4F6F3; --surface:#FFFFFF; --raise:#FBFCFA; --ink:#1B2320; --muted:#5C6A64;
+  --line:#DFE5E0; --line-soft:#EAEFEA; --accent:#0E7A5F; --accent-ink:#0A5C48;
+  --accent-soft:#E1EFE8; --signal:#BE4736; --signal-ink:#A03528; --signal-soft:#F9EAE6;
+  --mono-bg:#EEF2EE; --log-bg:#1B2320; --log-ink:#C9D4CD;
+  --shadow:0 1px 2px rgba(27,35,32,.05), 0 4px 16px rgba(27,35,32,.05);
 }
 @media (prefers-color-scheme: dark){
   :root{
-    --ground:#111614; --surface:#1A211E; --ink:#E7ECE8; --muted:#96A49D;
-    --line:#2B342F; --accent:#43C299; --accent-ink:#6FD8B4; --accent-soft:#1D2E27;
-    --signal:#E27562; --signal-soft:#332019; --mono-bg:#202824;
+    --ground:#0F1412; --surface:#181F1C; --raise:#1D2521; --ink:#E7ECE8; --muted:#93A19A;
+    --line:#2A332E; --line-soft:#232B27; --accent:#43C299; --accent-ink:#71D9B6;
+    --accent-soft:#1B2C25; --signal:#E27562; --signal-ink:#ED9282; --signal-soft:#30201B;
+    --mono-bg:#202824; --log-bg:#0B0F0D; --log-ink:#9FB0A7;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
   }
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--ground);color:var(--ink);font:400 16px/1.55 "Source Sans 3",system-ui,sans-serif}
-.wrap{max-width:760px;margin:0 auto;padding:36px 20px 80px}
-header{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:8px}
-h1{font-family:"Schibsted Grotesk",sans-serif;font-weight:800;font-size:26px;letter-spacing:-.01em;margin:0}
-.sub{color:var(--muted);font-size:14px}
-button{font:600 14px "Source Sans 3",sans-serif;border-radius:7px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:8px 14px;cursor:pointer}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--ground);color:var(--ink);font:400 15.5px/1.55 "Source Sans 3",system-ui,sans-serif}
+button{font:600 13.5px "Source Sans 3",sans-serif;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:8px 15px;cursor:pointer;transition:border-color .12s, background .12s, opacity .12s}
 button:hover{border-color:var(--muted)}
-button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button:focus-visible,input:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-button.primary:hover{filter:brightness(1.08)}
-button:disabled{opacity:.5;cursor:default}
-.bar{display:flex;gap:10px;align-items:center;margin:14px 0 26px;flex-wrap:wrap}
-.quiet{font-size:14px;color:var(--muted)}
-.quiet a{color:var(--accent-ink);cursor:pointer;text-decoration:underline}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:14px;display:flex;flex-direction:column;gap:10px}
-.card.lane4{border-left:4px solid var(--signal)}
-.card.lane3{border-left:4px solid var(--accent)}
-.tag{font:500 11px/1 "IBM Plex Mono",monospace;letter-spacing:.1em;text-transform:uppercase}
-.lane4 .tag{color:var(--signal)}
-.lane3 .tag{color:var(--accent-ink)}
-.title{font-family:"Schibsted Grotesk",sans-serif;font-weight:700;font-size:16.5px}
-.title a{color:inherit;text-decoration:none;border-bottom:1px solid var(--line)}
-.summary{font-size:15.5px}
-.reason{font-size:13px;color:var(--muted)}
-textarea{width:100%;min-height:110px;background:var(--mono-bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:12px 14px;font:400 14px/1.6 "Source Sans 3",sans-serif;resize:vertical}
-textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.draft-label{font:500 11px/1 "IBM Plex Mono",monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
-.actions{display:flex;gap:8px;flex-wrap:wrap}
-.status{font-size:14px;color:var(--accent-ink);font-weight:600}
-.status.err{color:var(--signal)}
-.empty{border:1px dashed var(--line);border-radius:10px;padding:40px;text-align:center;color:var(--muted)}
-#noise-list{display:none;margin:0 0 24px;padding:14px 18px;background:var(--surface);border:1px solid var(--line);border-radius:10px;font-size:14px;color:var(--muted)}
-#noise-list.open{display:block}
-#noise-list li{margin:4px 0}
-/* connections */
-#conn-chips{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
-.chip{display:inline-flex;align-items:center;gap:7px;font:500 12px "IBM Plex Mono",monospace;border:1px solid var(--line);border-radius:999px;padding:5px 12px;background:var(--surface);cursor:pointer}
+button.primary:hover{filter:brightness(1.07)}
+button.ghost{background:transparent}
+button:disabled{opacity:.45;cursor:default;filter:none}
+input,textarea{background:var(--mono-bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;font:400 14px/1.55 "Source Sans 3",sans-serif}
+::placeholder{color:var(--muted);opacity:.75}
+
+/* ---------- top bar ---------- */
+#topbar{position:sticky;top:0;z-index:20;background:color-mix(in srgb, var(--ground) 88%, transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line-soft)}
+#topbar .in{max-width:820px;margin:0 auto;padding:12px 22px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.wordmark{font-family:"Schibsted Grotesk",sans-serif;font-weight:800;font-size:18px;letter-spacing:-.01em}
+.wordmark .tld{color:var(--accent-ink)}
+#brain{font:500 11.5px "IBM Plex Mono",monospace;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:4px 10px}
+#topbar .grow{flex:1}
+#conn-chips{display:flex;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:7px;font:500 11.5px "IBM Plex Mono",monospace;border:1px solid var(--line);border-radius:999px;padding:5px 11px;background:var(--surface);cursor:pointer;color:var(--muted)}
+.chip:hover{border-color:var(--muted)}
 .chip .dot{width:7px;height:7px;border-radius:50%;background:var(--signal);flex:none}
+.chip.on{color:var(--ink)}
 .chip.on .dot{background:var(--accent)}
-#conn-panel{display:none;margin:0 0 26px;flex-direction:column;gap:10px}
-#conn-panel.open{display:flex}
-.conn{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 18px;display:flex;flex-direction:column;gap:8px}
-.conn .head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-.conn .name{font-family:"Schibsted Grotesk",sans-serif;font-weight:700}
-.conn .who{font:500 12.5px "IBM Plex Mono",monospace;color:var(--accent-ink)}
-.conn .detail{font-size:13.5px;color:var(--muted)}
-.conn .detail a{color:var(--accent-ink)}
-.conn form{display:flex;gap:8px;flex-wrap:wrap}
-.conn input{flex:1;min-width:220px;background:var(--mono-bg);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:8px 12px;font:400 13px "IBM Plex Mono",monospace}
-.conn input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.conn .msg{font-size:13px;font-weight:600;color:var(--accent-ink)}
-.conn .msg.err{color:var(--signal)}
-/* yolo toggle */
-.yolo{display:inline-flex;align-items:center;gap:9px;font:600 13px "Source Sans 3",sans-serif;color:var(--muted);cursor:pointer;user-select:none}
-.yolo .track{width:38px;height:21px;border-radius:999px;background:var(--line);position:relative;transition:background .15s}
-.yolo .knob{position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:var(--surface);box-shadow:0 1px 2px rgba(0,0,0,.25);transition:left .15s}
+.yolo{display:inline-flex;align-items:center;gap:8px;font:600 12.5px "Source Sans 3",sans-serif;color:var(--muted);cursor:pointer;user-select:none}
+.yolo .track{width:36px;height:20px;border-radius:999px;background:var(--line);position:relative;transition:background .15s}
+.yolo .knob{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--surface);box-shadow:0 1px 2px rgba(0,0,0,.3);transition:left .15s}
 .yolo.on{color:var(--accent-ink)}
 .yolo.on .track{background:var(--accent)}
-.yolo.on .knob{left:19px}
-/* work runs */
-#work{margin-top:44px}
-#work h2{font-family:"Schibsted Grotesk",sans-serif;font-weight:700;font-size:20px;margin:0 0 12px}
-.run{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:12px;display:flex;flex-direction:column;gap:9px}
-.run .head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.run .rtitle{font-family:"Schibsted Grotesk",sans-serif;font-weight:700;font-size:15.5px;flex:1;min-width:200px}
-.rpill{font:500 11px "IBM Plex Mono",monospace;letter-spacing:.07em;text-transform:uppercase;border-radius:999px;padding:4px 10px;border:1px solid var(--line);color:var(--muted)}
-.rpill.running{border-color:var(--accent);color:var(--accent-ink);animation:pulse 1.4s ease-in-out infinite}
-.rpill.waiting{border-color:var(--signal);color:var(--signal);animation:pulse 1.4s ease-in-out infinite}
-.rpill.failed{border-color:var(--signal);color:var(--signal)}
-.question{border:1px solid var(--signal);background:var(--signal-soft);border-radius:8px;padding:12px 15px;display:flex;flex-direction:column;gap:8px}
-.question .qtext{font-weight:600;font-size:15px}
-#new-task{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
-#new-task input{flex:1;min-width:240px;background:var(--mono-bg);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:9px 13px;font:400 14.5px "Source Sans 3",sans-serif}
-#new-task input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-@keyframes pulse{50%{opacity:.45}}
-@media (prefers-reduced-motion: reduce){.rpill.running{animation:none}}
-.rlog{background:var(--mono-bg);border-radius:8px;padding:10px 14px;font:400 12.5px/1.6 "IBM Plex Mono",monospace;max-height:180px;overflow:auto;white-space:pre-wrap;color:var(--muted)}
-.rreport{font-size:15px;white-space:pre-wrap;border-left:3px solid var(--accent);padding-left:14px}
-.run form{display:flex;flex-direction:column;gap:8px}
-.run textarea{min-height:64px}
-/* ask-about-this */
-.ask{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px}
-.ask input{flex:1;min-width:200px;background:var(--mono-bg);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:8px 12px;font:400 14px "Source Sans 3",sans-serif}
-.ask input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.answer{background:var(--mono-bg);border-radius:8px;padding:12px 15px;font-size:14.5px;white-space:pre-wrap}
-.answer .q{font-weight:600;color:var(--muted);display:block;margin-bottom:6px}
+.yolo.on .knob{left:18px}
+
+/* ---------- layout ---------- */
+.wrap{max-width:820px;margin:0 auto;padding:34px 22px 90px}
+h1{font-family:"Schibsted Grotesk",sans-serif;font-weight:800;font-size:clamp(26px,4.5vw,34px);letter-spacing:-.015em;margin:0;text-wrap:balance}
+#headline{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+#pulse{color:var(--muted);font-size:15px;margin:2px 0 24px}
+#pulse b{color:var(--ink)}
+#pulse a{color:var(--accent-ink);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+section{margin-top:46px}
+.sec-title{display:flex;align-items:baseline;gap:12px;margin-bottom:14px}
+.sec-title h2{font-family:"Schibsted Grotesk",sans-serif;font-weight:700;font-size:19px;margin:0}
+.sec-title .hint{font-size:13px;color:var(--muted)}
+
+/* ---------- panels ---------- */
+#conn-panel{display:none;margin:6px 0 22px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:10px}
+#conn-panel.open{display:grid}
+.conn{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:15px 17px;display:flex;flex-direction:column;gap:9px;box-shadow:var(--shadow)}
+.conn .head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.conn .name{font-family:"Schibsted Grotesk",sans-serif;font-weight:700;font-size:15px}
+.conn .who{font:500 11.5px "IBM Plex Mono",monospace;color:var(--accent-ink)}
+.conn .detail{font-size:13px;color:var(--muted)}
+.conn .detail a{color:var(--accent-ink)}
+.conn form{display:flex;gap:8px;flex-wrap:wrap}
+.conn input{flex:1;min-width:170px;padding:8px 12px;font-family:"IBM Plex Mono",monospace;font-size:12.5px}
+.msg{font-size:12.5px;font-weight:600;color:var(--accent-ink)}
+.msg.err{color:var(--signal-ink)}
+#noise-list{display:none;margin:0 0 22px;padding:6px 18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;font-size:13.5px;color:var(--muted)}
+#noise-list.open{display:block}
+#noise-list li{margin:9px 0;list-style:none;padding-left:0}
+#noise-list li::before{content:"·";margin-right:8px}
+
+/* ---------- queue cards ---------- */
+.card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px 16px 23px;margin-bottom:14px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--shadow)}
+.card::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;border-radius:3px}
+.card.lane3::before{background:var(--accent)}
+.card.lane4::before{background:var(--signal)}
+.meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font:500 11px "IBM Plex Mono",monospace;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.lane4 .meta .lane-tag{color:var(--signal-ink)}
+.lane3 .meta .lane-tag{color:var(--accent-ink)}
+.meta .when{margin-left:auto;letter-spacing:0;text-transform:none}
+.card .title{font-family:"Schibsted Grotesk",sans-serif;font-weight:700;font-size:16.5px;line-height:1.3;text-wrap:balance}
+.card .title a{color:inherit;text-decoration:none}
+.card .title a:hover{color:var(--accent-ink)}
+.card .summary{font-size:15.5px}
+.card .reason{font-size:12.5px;color:var(--muted)}
+.draft{display:flex;flex-direction:column;gap:6px;background:var(--raise);border:1px solid var(--line-soft);border-radius:10px;padding:12px 14px}
+.draft .dlabel{font:500 10.5px "IBM Plex Mono",monospace;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+.draft textarea{min-height:96px;resize:vertical;padding:10px 12px;background:var(--surface)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.status{font-size:13.5px;color:var(--accent-ink);font-weight:600}
+.status.err{color:var(--signal-ink)}
+.empty{border:1px dashed var(--line);border-radius:12px;padding:44px 20px;text-align:center;color:var(--muted);font-size:15px}
+.empty b{color:var(--ink)}
+
+/* ask */
+.ask{display:flex;gap:8px}
+.ask input{flex:1;padding:8px 13px}
+.answer{background:var(--raise);border:1px solid var(--line-soft);border-radius:10px;padding:11px 14px;font-size:14px;white-space:pre-wrap}
+.answer .q{font-weight:600;color:var(--accent-ink);display:block;margin-bottom:5px;font-size:13px}
+.askwrap{display:flex;flex-direction:column;gap:8px}
+
+/* ---------- work ---------- */
+#new-task{display:flex;gap:8px;margin-bottom:16px}
+#new-task input{flex:1;padding:10px 14px;font-size:14.5px;background:var(--surface)}
+.run{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 19px;margin-bottom:12px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--shadow)}
+.run .head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.run .rtitle{font-family:"Schibsted Grotesk",sans-serif;font-weight:700;font-size:15px;flex:1;min-width:180px;line-height:1.35}
+.run .when{font:400 11.5px "IBM Plex Mono",monospace;color:var(--muted)}
+.rpill{font:500 10.5px "IBM Plex Mono",monospace;letter-spacing:.08em;text-transform:uppercase;border-radius:999px;padding:4px 11px;border:1px solid var(--line);color:var(--muted);flex:none}
+.rpill.running{border-color:var(--accent);color:var(--accent-ink);animation:pulse 1.5s ease-in-out infinite}
+.rpill.waiting{border-color:var(--signal);color:var(--signal-ink);animation:pulse 1.5s ease-in-out infinite}
+.rpill.failed{border-color:var(--signal);color:var(--signal-ink)}
+@keyframes pulse{50%{opacity:.4}}
+@media (prefers-reduced-motion: reduce){.rpill.running,.rpill.waiting{animation:none}}
+.question{border:1px solid var(--signal);background:var(--signal-soft);border-radius:10px;padding:13px 15px;display:flex;flex-direction:column;gap:10px}
+.question .qtext{font-weight:600;font-size:14.5px}
+.question form{display:flex;gap:8px}
+.question input{flex:1;padding:9px 13px;background:var(--surface)}
+.rlog{background:var(--log-bg);color:var(--log-ink);border-radius:10px;padding:11px 15px;font:400 12px/1.65 "IBM Plex Mono",monospace;max-height:170px;overflow:auto;white-space:pre-wrap}
+.rreport{font-size:14.5px;white-space:pre-wrap;border-left:3px solid var(--accent);padding:2px 0 2px 14px}
+.continue{display:flex;flex-direction:column;gap:8px}
+.continue textarea{min-height:58px;padding:10px 12px;resize:vertical}
+.continue .row{display:flex;justify-content:flex-end}
+
+/* ---------- toasts ---------- */
+#toasts{position:fixed;bottom:18px;right:18px;display:flex;flex-direction:column;gap:8px;z-index:50;max-width:min(420px,90vw)}
+.toast{background:var(--ink);color:var(--ground);border-radius:10px;padding:11px 16px;font-size:13.5px;font-weight:600;box-shadow:var(--shadow);animation:rise .18s ease-out}
+.toast.err{background:var(--signal)}
+.toast.err{color:#fff}
+@keyframes rise{from{transform:translateY(6px);opacity:0}}
+@media (prefers-reduced-motion: reduce){.toast{animation:none}}
 </style>
 </head>
 <body>
+<div id="topbar"><div class="in">
+  <span class="wordmark">stand<span class="tld">in</span></span>
+  <span id="brain" title="the brain this session runs on">…</span>
+  <span class="grow"></span>
+  <div id="conn-chips" title="connections — click to manage"></div>
+  <span class="yolo" id="yolo" role="switch" aria-checked="false" tabindex="0" title="yolo: agents may work end-to-end; decisions, sends and merges stay yours">
+    <span class="track"><span class="knob"></span></span>yolo
+  </span>
+</div></div>
+
 <div class="wrap">
-  <header>
+  <div id="headline">
     <h1>Who needs you</h1>
-    <span class="sub" id="brain-note">nothing sends without your yes</span>
-  </header>
-  <div class="bar">
     <button class="primary" id="triage-btn">Run triage</button>
-    <span class="quiet" id="quiet-line"></span>
-    <div id="conn-chips" title="connections — click to manage"></div>
-    <span class="yolo" id="yolo" role="switch" aria-checked="false" tabindex="0" title="yolo mode: I do the rote work end-to-end; you keep decisions, sends and merges">
-      <span class="track"><span class="knob"></span></span>yolo
-    </span>
   </div>
+  <p id="pulse">loading your queue…</p>
   <div id="conn-panel"></div>
   <ul id="noise-list"></ul>
-  <div id="queue-anchor"></div>
   <div id="queue"></div>
+
   <section id="work">
-    <h2>Work</h2>
+    <div class="sec-title"><h2>Work</h2><span class="hint">agents run here — they brief you, you say go, they build and deliver drafts</span></div>
     <form id="new-task">
-      <input id="task-input" placeholder="give an agent a task — “rebase lucia/reach-engagement carefully onto main”, “investigate the OOM in AIS-4670”…">
+      <input id="task-input" placeholder="give an agent a task — it gathers context and briefs you before touching anything">
       <button class="primary" type="submit">Run agent</button>
     </form>
     <div id="runs"></div>
   </section>
 </div>
+<div id="toasts"></div>
+
 <script>
 const $ = (s, el=document) => el.querySelector(s);
+
+function toast(msg, kind) {
+  const t = document.createElement("div");
+  t.className = "toast" + (kind === "err" ? " err" : "");
+  t.textContent = msg;
+  $("#toasts").append(t);
+  setTimeout(() => t.remove(), 4200);
+}
 
 async function api(path, opts) {
   const res = await fetch(path, opts ? {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(opts)} : undefined);
@@ -144,49 +199,143 @@ async function api(path, opts) {
   return data;
 }
 
+function esc(s) { const d = document.createElement("div"); d.textContent = s ?? ""; return d.innerHTML; }
+function timeAgo(iso) {
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 90) return "just now";
+  if (s < 3600) return Math.round(s/60) + "m ago";
+  if (s < 86400) return Math.round(s/3600) + "h ago";
+  return Math.round(s/86400) + "d ago";
+}
+function mkBtn(text, cls, onclick) {
+  const b = document.createElement("button");
+  if (cls) b.className = cls;
+  b.textContent = text;
+  b.addEventListener("click", onclick);
+  return b;
+}
+
+/* ---------------- queue ---------------- */
+async function load() {
+  const data = await api("/api/queue");
+  const q = $("#queue");
+  q.replaceChildren();
+  const l4 = data.items.filter(i => i.lane === 4).length;
+  const l3 = data.items.length - l4;
+  const parts = [];
+  if (l4) parts.push(`<b>${l4} urgent</b>`);
+  if (l3) parts.push(`<b>${l3}</b> need${l3 === 1 ? "s" : ""} a decision`);
+  if (!parts.length) parts.push("nothing needs you");
+  let quiet = data.quiet ? ` · ${data.quiet} handled quietly <a id="show-noise">show</a>` : "";
+  $("#pulse").innerHTML = parts.join(" · ") + quiet;
+  const nl = $("#noise-list");
+  nl.replaceChildren(...data.noise.map(n => { const li = document.createElement("li"); li.textContent = n.title + " — " + n.summary; return li; }));
+  const tgl = $("#show-noise");
+  if (tgl) tgl.addEventListener("click", () => nl.classList.toggle("open"));
+  if (data.items.length === 0) {
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.innerHTML = "<b>Queue clear.</b><br>Run triage to read your inbox again.";
+    q.append(e);
+  } else {
+    data.items.forEach(i => q.append(card(i)));
+  }
+}
+
 function card(item) {
   const el = document.createElement("div");
   el.className = "card lane" + item.lane;
   el.innerHTML = `
-    <span class="tag">${item.lane === 4 ? "escalate now" : "needs you"} · ${item.source}</span>
+    <div class="meta">
+      <span class="lane-tag">${item.lane === 4 ? "escalate now" : "needs you"}</span>
+      <span>${esc(item.source)}</span>
+      ${item.actor ? `<span>· ${esc(item.actor)}</span>` : ""}
+      <span class="when">${timeAgo(item.createdAt)}</span>
+    </div>
     <div class="title">${item.url ? `<a href="${item.url}" target="_blank" rel="noopener">${esc(item.title)}</a>` : esc(item.title)}</div>
     <div class="summary">${esc(item.summary)}</div>
-    <div class="reason">why: ${esc(item.reason)}</div>`;
+    <div class="reason">why here: ${esc(item.reason)}</div>`;
+  const actions = document.createElement("div");
+  actions.className = "actions";
   if (item.draft && item.action) {
+    const draft = document.createElement("div");
+    draft.className = "draft";
     const label = document.createElement("span");
-    label.className = "draft-label";
-    label.textContent = "draft — edit freely; what you approve is exactly what sends";
+    label.className = "dlabel";
+    label.textContent = "draft · edit freely · what you approve is exactly what sends";
     const ta = document.createElement("textarea");
     ta.value = item.draft;
-    el.append(label, ta);
-    const actions = document.createElement("div");
-    actions.className = "actions";
+    draft.append(label, ta);
+    el.append(draft);
     const approve = mkBtn("Approve & send", "primary", async () => {
       approve.disabled = true;
       try {
         const r = await api(`/api/items/${item.id}/approve`, { draft: ta.value });
         done(el, "✓ " + r.note);
+        toast("Sent — " + r.note);
       } catch (e) { fail(el, e); approve.disabled = false; }
     });
-    actions.append(approve, workBtn(item), dismissBtn(item, el), noiseBtn(item, el));
-    el.append(actions);
-  } else {
-    const actions = document.createElement("div");
-    actions.className = "actions";
-    actions.append(workBtn(item), dismissBtn(item, el, "Seen — clear it"), noiseBtn(item, el));
-    el.append(actions);
+    actions.append(approve);
   }
-  el.append(askBox(item));
+  actions.append(workBtn(item), dismissBtn(item, el, item.draft ? "Not now" : "Seen — clear it"), noiseBtn(item, el));
+  el.append(actions, askBox(item));
   return el;
+}
+
+function dismissBtn(item, el, label) {
+  return mkBtn(label, "ghost", async () => {
+    await api(`/api/items/${item.id}/dismiss`, {});
+    el.remove();
+    load();
+  });
+}
+function noiseBtn(item, el) {
+  return mkBtn("This is noise", "ghost", async () => {
+    const r = await api(`/api/items/${item.id}/noise`, {});
+    toast("Hidden — the line moved: " + r.rule);
+    el.remove();
+    load();
+  });
+}
+let yoloOn = false;
+function workBtn(item) {
+  const b = mkBtn("Go do it", "", async () => {
+    if (!yoloOn) { toast("Flip yolo on first — then agents may work", "err"); return; }
+    b.disabled = true; b.textContent = "Agent on it…";
+    try {
+      await api("/api/work", { itemId: item.id });
+      toast("Agent started — it will brief you before touching anything");
+      await loadRuns();
+      $("#work").scrollIntoView({ behavior: "smooth" });
+    } catch (e) { toast(e.message, "err"); b.disabled = false; b.textContent = "Go do it"; }
+  });
+  b.title = "an agent gathers context, briefs you, and only works after your go";
+  if (!yoloOn) b.hidden = true;
+  b.dataset.work = "1";
+  return b;
+}
+function done(el, msg) {
+  const s = document.createElement("div");
+  s.className = "status";
+  s.textContent = msg;
+  el.append(s);
+  el.querySelectorAll("button,textarea,input").forEach(n => n.disabled = true);
+}
+function fail(el, e) {
+  const s = document.createElement("div");
+  s.className = "status err";
+  s.textContent = "failed: " + e.message;
+  el.append(s);
 }
 
 function askBox(item) {
   const wrap = document.createElement("div");
+  wrap.className = "askwrap";
   const form = document.createElement("form");
   form.className = "ask";
   const input = document.createElement("input");
-  input.placeholder = "ask about this — context, who's involved, what your options are…";
-  const btn = mkBtn("Ask", "", () => {});
+  input.placeholder = "ask about this — context, who's involved, your options…";
+  const btn = mkBtn("Ask", "ghost", () => {});
   btn.type = "submit";
   form.append(input, btn);
   form.addEventListener("submit", async (e) => {
@@ -209,91 +358,22 @@ function askBox(item) {
     }
   });
   wrap.append(form);
-  wrap.style.display = "flex";
-  wrap.style.flexDirection = "column";
-  wrap.style.gap = "8px";
   return wrap;
 }
 
-let yoloOn = false;
-function workBtn(item) {
-  const b = mkBtn("Go do it", "", async () => {
-    if (!yoloOn) { alert("Flip the yolo switch first — then I do the work end-to-end."); return; }
-    b.disabled = true; b.textContent = "On it…";
-    try {
-      await api("/api/work", { itemId: item.id });
-      await loadRuns();
-      document.querySelector("#work").scrollIntoView({ behavior: "smooth" });
-    } catch (e) { alert(e.message); b.disabled = false; b.textContent = "Go do it"; }
-  });
-  b.title = "yolo: branch, code, test, push — then a report with the decisions that need you";
-  if (!yoloOn) b.hidden = true;
-  b.dataset.work = "1";
-  return b;
-}
-
-function mkBtn(text, cls, onclick) {
-  const b = document.createElement("button");
-  if (cls) b.className = cls;
-  b.textContent = text;
-  b.addEventListener("click", onclick);
-  return b;
-}
-function dismissBtn(item, el, label) {
-  return mkBtn(label || "Not now", "", async () => {
-    await api(`/api/items/${item.id}/dismiss`, {});
-    el.remove();
-  });
-}
-function noiseBtn(item, el) {
-  return mkBtn("This is noise", "", async () => {
-    const r = await api(`/api/items/${item.id}/noise`, {});
-    done(el, "hidden — and the line moved: " + r.rule);
-    setTimeout(() => el.remove(), 2500);
-  });
-}
-function done(el, msg) {
-  const s = document.createElement("div");
-  s.className = "status";
-  s.textContent = msg;
-  el.append(s);
-  el.querySelectorAll("button,textarea").forEach(n => n.disabled = true);
-}
-function fail(el, e) {
-  const s = document.createElement("div");
-  s.className = "status err";
-  s.textContent = "failed: " + e.message;
-  el.append(s);
-}
-function esc(s) { const d = document.createElement("div"); d.textContent = s ?? ""; return d.innerHTML; }
-
-async function load() {
-  const data = await api("/api/queue");
-  const q = $("#queue");
-  q.replaceChildren();
-  if (data.items.length === 0) {
-    const e = document.createElement("div");
-    e.className = "empty";
-    e.textContent = "Nothing needs you. Run triage to check again.";
-    q.append(e);
-  } else {
-    data.items.forEach(i => q.append(card(i)));
-  }
-  $("#quiet-line").innerHTML = `handled quietly: <b>${data.quiet}</b> ${data.quiet ? '· <a id="show-noise">show</a>' : ""}`;
-  const nl = $("#noise-list");
-  nl.replaceChildren(...data.noise.map(n => { const li = document.createElement("li"); li.textContent = n.title + " — " + n.summary; return li; }));
-  const toggle = $("#show-noise");
-  if (toggle) toggle.addEventListener("click", () => nl.classList.toggle("open"));
-}
-
+/* ---------------- connections ---------------- */
 async function loadConnections() {
   const { connections } = await api("/api/connections");
   const chips = $("#conn-chips");
   chips.replaceChildren(...connections.map(c => {
     const chip = document.createElement("span");
     chip.className = "chip" + (c.connected ? " on" : "");
+    chip.setAttribute("role", "button");
+    chip.tabIndex = 0;
     chip.innerHTML = `<span class="dot"></span>${esc(c.name)}`;
-    chip.addEventListener("click", () => $("#conn-panel").classList.toggle("open"));
+    const open = () => $("#conn-panel").classList.toggle("open");
+    chip.addEventListener("click", open);
+    chip.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
     return chip;
   }));
   const panel = $("#conn-panel");
@@ -312,83 +392,69 @@ function connCard(c) {
       ${c.connected && c.who ? `<span class="who">✓ ${esc(c.who)}</span>` : ""}
     </div>
     <div class="detail">${esc(c.detail)}${c.connected ? "" : help}</div>`;
-  if (c.acceptsToken) {
-    if (!c.connected) {
-      if (c.id === "linear") {
-        const row = document.createElement("div");
-        row.className = "actions";
-        const msg = document.createElement("span");
-        msg.className = "msg";
-        const oauth = mkBtn("Sign in with Linear", "primary", async () => {
-          oauth.disabled = true;
-          msg.className = "msg";
-          msg.textContent = "your browser is opening — approve access on Linear's page…";
-          try {
-            const r = await api("/api/connections/linear-oauth", {});
-            msg.textContent = "connected: " + r.who;
-            await loadConnections();
-          } catch (err) {
-            msg.className = "msg err";
-            msg.textContent = err.message;
-            oauth.disabled = false;
-          }
-        });
-        row.append(oauth, msg);
-        el.append(row);
-        const or = document.createElement("div");
-        or.className = "detail";
-        or.textContent = "or paste an API key:";
-        el.append(or);
-      }
-      const form = document.createElement("form");
-      const input = document.createElement("input");
-      input.type = "password";
-      input.placeholder = c.id === "linear" ? "lin_api_…" : "xoxb-…";
-      input.autocomplete = "off";
-      const btn = mkBtn("Connect", "primary", () => {});
-      btn.type = "submit";
-      const msg = document.createElement("span");
-      msg.className = "msg";
-      form.append(input, btn, msg);
-      form.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        btn.disabled = true; msg.className = "msg"; msg.textContent = "checking with " + c.name + "…";
-        try {
-          const r = await api(`/api/connections/${c.id}`, { token: input.value });
-          msg.textContent = "connected as " + r.who;
-          await loadConnections();
-        } catch (err) {
-          msg.className = "msg err";
-          msg.textContent = err.message + " — nothing was saved";
-          btn.disabled = false;
-        }
-      });
-      el.append(form);
-    } else {
+  if (c.acceptsToken && !c.connected) {
+    if (c.id === "linear") {
       const row = document.createElement("div");
       row.className = "actions";
-      row.append(mkBtn("Disconnect", "", async () => {
-        await fetch(`/api/connections/${c.id}`, { method: "DELETE" });
-        await loadConnections();
-      }));
+      const msg = document.createElement("span");
+      msg.className = "msg";
+      const oauth = mkBtn("Sign in with Linear", "primary", async () => {
+        oauth.disabled = true;
+        msg.textContent = "browser opening — approve on Linear's page…";
+        try {
+          const r = await api("/api/connections/linear-oauth", {});
+          toast("Linear connected — " + r.who);
+          await loadConnections();
+        } catch (err) {
+          msg.className = "msg err"; msg.textContent = err.message; oauth.disabled = false;
+        }
+      });
+      row.append(oauth, msg);
       el.append(row);
+      const or = document.createElement("div");
+      or.className = "detail";
+      or.textContent = "or paste an API key:";
+      el.append(or);
     }
+    const form = document.createElement("form");
+    const input = document.createElement("input");
+    input.type = "password";
+    input.placeholder = c.id === "linear" ? "lin_api_…" : "xoxb-…";
+    input.autocomplete = "off";
+    const btn = mkBtn("Connect", "primary", () => {});
+    btn.type = "submit";
+    const msg = document.createElement("span");
+    msg.className = "msg";
+    form.append(input, btn, msg);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      btn.disabled = true; msg.className = "msg"; msg.textContent = "checking with " + c.name + "…";
+      try {
+        const r = await api(`/api/connections/${c.id}`, { token: input.value });
+        toast(c.name + " connected as " + r.who);
+        await loadConnections();
+      } catch (err) {
+        msg.className = "msg err"; msg.textContent = err.message + " — nothing saved"; btn.disabled = false;
+      }
+    });
+    el.append(form);
+  } else if (c.acceptsToken && c.connected) {
+    const row = document.createElement("div");
+    row.className = "actions";
+    row.append(mkBtn("Disconnect", "ghost", async () => {
+      await fetch(`/api/connections/${c.id}`, { method: "DELETE" });
+      await loadConnections();
+    }));
+    el.append(row);
   }
   return el;
 }
 
-$("#triage-btn").addEventListener("click", async () => {
-  const b = $("#triage-btn");
-  b.disabled = true; b.textContent = "Reading your inbox…";
-  try { await api("/api/triage", {}); await load(); }
-  catch (e) { alert(e.message); }
-  finally { b.disabled = false; b.textContent = "Run triage"; }
-});
-
-// --- yolo toggle ---
+/* ---------------- yolo ---------------- */
 async function loadYolo() {
-  const { on } = await api("/api/yolo");
-  yoloOn = on;
+  const r = await api("/api/yolo");
+  yoloOn = r.on;
+  if (r.brain) $("#brain").textContent = r.brain;
   renderYolo();
 }
 function renderYolo() {
@@ -401,27 +467,24 @@ async function toggleYolo() {
   const { on } = await api("/api/yolo", { on: !yoloOn });
   yoloOn = on;
   renderYolo();
+  toast(on ? "Yolo on — agents may work; sends and merges stay yours" : "Yolo off — triage and drafts only");
 }
-$("#new-task").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const input = $("#task-input");
-  const instructions = input.value.trim();
-  if (!instructions) return;
-  if (!yoloOn) { alert("Flip the yolo switch first — agents need your go-ahead to work."); return; }
-  input.value = "";
-  try { await api("/api/work", { instructions }); await loadRuns(); }
-  catch (err) { alert(err.message); }
-});
-
 $("#yolo").addEventListener("click", toggleYolo);
 $("#yolo").addEventListener("keydown", e => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggleYolo(); } });
 
-// --- work runs ---
+/* ---------------- work runs ---------------- */
 let runsTimer = null;
 async function loadRuns() {
   const { runs } = await api("/api/runs");
   const box = $("#runs");
-  box.replaceChildren(...runs.map(runCard));
+  if (runs.length === 0) {
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.innerHTML = "No agents have run yet.<br><b>Go do it</b> on a card, or give one a task above.";
+    box.replaceChildren(e);
+  } else {
+    box.replaceChildren(...runs.map(runCard));
+  }
   const anyActive = runs.some(r => r.status === "running" || r.status === "waiting");
   clearTimeout(runsTimer);
   if (anyActive) runsTimer = setTimeout(loadRuns, 3000);
@@ -432,13 +495,13 @@ function runCard(r) {
   el.className = "run";
   const head = document.createElement("div");
   head.className = "head";
-  head.innerHTML = `<span class="rtitle">${esc(r.title)}</span><span class="rpill ${r.status}">${PILL[r.status] ?? r.status}</span>`;
+  head.innerHTML = `<span class="rtitle">${esc(r.title)}</span><span class="when">${timeAgo(r.updatedAt)}</span><span class="rpill ${r.status}">${PILL[r.status] ?? r.status}</span>`;
   el.append(head);
   if (r.status === "waiting" && r.question) {
     const qEl = document.createElement("div");
     qEl.className = "question";
+    qEl.innerHTML = `<span class="qtext">${esc(r.question.question)}</span>`;
     const form = document.createElement("form");
-    form.className = "ask";
     const input = document.createElement("input");
     input.placeholder = "your answer — the agent continues the moment you send it";
     const send = mkBtn("Answer", "primary", () => {});
@@ -449,9 +512,8 @@ function runCard(r) {
       if (!input.value.trim()) return;
       send.disabled = true;
       try { await api(`/api/questions/${r.question.id}/answer`, { answer: input.value }); await loadRuns(); }
-      catch (err) { alert(err.message); send.disabled = false; }
+      catch (err) { toast(err.message, "err"); send.disabled = false; }
     });
-    qEl.innerHTML = `<span class="qtext">❓ ${esc(r.question.question)}</span>`;
     qEl.append(form);
     el.append(qEl);
   }
@@ -462,30 +524,59 @@ function runCard(r) {
     el.append(log);
     log.scrollTop = log.scrollHeight;
   }
-  if (r.status !== "running" && r.report) {
+  if ((r.status === "done" || r.status === "failed") && r.report) {
     const rep = document.createElement("div");
     rep.className = "rreport";
     rep.textContent = r.report;
     el.append(rep);
   }
-  if (r.status !== "running" && r.sessionId) {
+  if ((r.status === "done" || r.status === "failed") && r.sessionId) {
     const form = document.createElement("form");
+    form.className = "continue";
     const ta = document.createElement("textarea");
-    ta.placeholder = "answer its questions / tell it what to change — it picks up where it left off";
+    ta.placeholder = "answer its open questions or redirect it — same agent, full context";
+    const row = document.createElement("div");
+    row.className = "row";
     const send = mkBtn("Answer & continue", "primary", () => {});
     send.type = "submit";
-    form.append(ta, send);
+    row.append(send);
+    form.append(ta, row);
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       if (!ta.value.trim()) return;
       send.disabled = true;
       try { await api(`/api/runs/${r.id}/continue`, { answer: ta.value }); await loadRuns(); }
-      catch (err) { alert(err.message); send.disabled = false; }
+      catch (err) { toast(err.message, "err"); send.disabled = false; }
     });
     el.append(form);
   }
   return el;
 }
+
+$("#new-task").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = $("#task-input");
+  const instructions = input.value.trim();
+  if (!instructions) return;
+  if (!yoloOn) { toast("Flip yolo on first — then agents may work", "err"); return; }
+  input.value = "";
+  try {
+    await api("/api/work", { instructions });
+    toast("Agent started — it will brief you before touching anything");
+    await loadRuns();
+  } catch (err) { toast(err.message, "err"); }
+});
+
+$("#triage-btn").addEventListener("click", async () => {
+  const b = $("#triage-btn");
+  b.disabled = true; b.textContent = "Reading your inbox…";
+  try {
+    const r = await api("/api/triage", {});
+    toast(`Triage done — ${r.new} new item${r.new === 1 ? "" : "s"}`);
+    await load();
+  } catch (e) { toast(e.message, "err"); }
+  finally { b.disabled = false; b.textContent = "Run triage"; }
+});
 
 load();
 loadConnections();

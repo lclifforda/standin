@@ -89,7 +89,11 @@ const server = createServer(async (req, res) => {
     } else if (req.method === "GET" && url.pathname === "/api/audit") {
       json(res, 200, { events: listAudit(db) });
     } else if (req.method === "GET" && url.pathname === "/api/yolo") {
-      json(res, 200, { on: getSetting(db, "yolo") === "on", workspaces: config.workspaces });
+      json(res, 200, {
+        on: getSetting(db, "yolo") === "on",
+        workspaces: config.workspaces,
+        brain: config.brainDir.split("/").at(-1),
+      });
     } else if (req.method === "POST" && url.pathname === "/api/yolo") {
       const body = await readBody(req);
       setSetting(db, "yolo", body.on ? "on" : "off");
