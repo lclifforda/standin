@@ -44,7 +44,26 @@ docker/      one image, /data volume per person ← phase 3
 Roadmap and architecture: **PLAN.md** (the build plan) and **PRODUCT.md** (the product
 thinking). North star lives in `template/NORTH_STAR.md`.
 
+## Running the coded pipeline (phase 1+)
+
+```bash
+pnpm install
+cp template/.env.example ~/standin-data/.env   # add your LINEAR_API_KEY
+pnpm triage                                    # ingest → classify → queue
+pnpm web                                       # decision queue at http://localhost:4180
+```
+
+Or from the CLI: `standin triage · queue · approve <id> · dismiss <id> · audit`.
+
+How it hangs together: connectors ingest deterministically (your tokens, no model);
+the model's one job is judgment — lanes, plain-language summaries, drafts in your
+voice; and the only door out is `executeApproved()` in `packages/core/src/contract.ts`,
+which demands an approval minted by your explicit yes, spends it once, and hash-checks
+that what sends is byte-for-byte what you approved. Six tests pin those guarantees.
+
 ## Status
 
-Phase 0. The brain + CLI loop is proven on a real inbox (Linear + Slack + GitHub);
-core/agent packages, the web UI, and Docker packaging are next — in that order.
+Phase 1 shipped: core (SQLite + contract-as-API, tested), connectors (Linear ingest +
+Linear/Slack/GitHub executors), agent classification, CLI, and the first slice of
+phase 2 — the decision-queue web UI with approve-to-send and "this is noise" learning.
+Next: onboarding/training wizard + audit screen, then Docker + the second user.

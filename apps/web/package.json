@@ -1,0 +1,13 @@
+{
+  "name": "@standin/web",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "@standin/core": "workspace:*",
+    "@standin/agent": "workspace:*"
+  },
+  "devDependencies": { "tsx": "^4.19.0" }
+}

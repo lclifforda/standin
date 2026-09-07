@@ -1,0 +1,18 @@
+{
+  "name": "standin",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "typecheck": "pnpm -r exec tsc --noEmit",
+    "test": "pnpm -r --if-present test",
+    "triage": "pnpm --filter @standin/agent triage",
+    "web": "pnpm --filter @standin/web start"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0"
+  }
+}

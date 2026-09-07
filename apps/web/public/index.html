@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Standin</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;700;800&family=Source+Sans+3:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#F5F7F4; --surface:#FFFFFF; --ink:#1B2320; --muted:#5C6A64;
+  --line:#DDE4DF; --accent:#0E7A5F; --accent-ink:#0A5C48; --accent-soft:#E3F0EA;
+  --signal:#BE4736; --signal-soft:#F7E7E3; --mono-bg:#EDF1EE;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --ground:#111614; --surface:#1A211E; --ink:#E7ECE8; --muted:#96A49D;
+    --line:#2B342F; --accent:#43C299; --accent-ink:#6FD8B4; --accent-soft:#1D2E27;
+    --signal:#E27562; --signal-soft:#332019; --mono-bg:#202824;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:400 16px/1.55 "Source Sans 3",system-ui,sans-serif}
+.wrap{max-width:760px;margin:0 auto;padding:36px 20px 80px}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+h1{font-family:"Schibsted Grotesk",sans-serif;font-weight:800;font-size:26px;letter-spacing:-.01em;margin:0}
+.sub{color:var(--muted);font-size:14px}
+button{font:600 14px "Source Sans 3",sans-serif;border-radius:7px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:8px 14px;cursor:pointer}
+button:hover{border-color:var(--muted)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary:hover{filter:brightness(1.08)}
+button:disabled{opacity:.5;cursor:default}
+.bar{display:flex;gap:10px;align-items:center;margin:14px 0 26px;flex-wrap:wrap}
+.quiet{font-size:14px;color:var(--muted)}
+.quiet a{color:var(--accent-ink);cursor:pointer;text-decoration:underline}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:14px;display:flex;flex-direction:column;gap:10px}
+.card.lane4{border-left:4px solid var(--signal)}
+.card.lane3{border-left:4px solid var(--accent)}
+.tag{font:500 11px/1 "IBM Plex Mono",monospace;letter-spacing:.1em;text-transform:uppercase}
+.lane4 .tag{color:var(--signal)}
+.lane3 .tag{color:var(--accent-ink)}
+.title{font-family:"Schibsted Grotesk",sans-serif;font-weight:700;font-size:16.5px}
+.title a{color:inherit;text-decoration:none;border-bottom:1px solid var(--line)}
+.summary{font-size:15.5px}
+.reason{font-size:13px;color:var(--muted)}
+textarea{width:100%;min-height:110px;background:var(--mono-bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:12px 14px;font:400 14px/1.6 "Source Sans 3",sans-serif;resize:vertical}
+textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.draft-label{font:500 11px/1 "IBM Plex Mono",monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.status{font-size:14px;color:var(--accent-ink);font-weight:600}
+.status.err{color:var(--signal)}
+.empty{border:1px dashed var(--line);border-radius:10px;padding:40px;text-align:center;color:var(--muted)}
+#noise-list{display:none;margin:0 0 24px;padding:14px 18px;background:var(--surface);border:1px solid var(--line);border-radius:10px;font-size:14px;color:var(--muted)}
+#noise-list.open{display:block}
+#noise-list li{margin:4px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Who needs you</h1>
+    <span class="sub" id="brain-note">nothing sends without your yes</span>
+  </header>
+  <div class="bar">
+    <button class="primary" id="triage-btn">Run triage</button>
+    <span class="quiet" id="quiet-line"></span>
+  </div>
+  <ul id="noise-list"></ul>
+  <div id="queue"></div>
+</div>
+<script>
+const $ = (s, el=document) => el.querySelector(s);
+
+async function api(path, opts) {
+  const res = await fetch(path, opts ? {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(opts)} : undefined);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function card(item) {
+  const el = document.createElement("div");
+  el.className = "card lane" + item.lane;
+  el.innerHTML = `
+    <span class="tag">${item.lane === 4 ? "escalate now" : "needs you"} · ${item.source}</span>
+    <div class="title">${item.url ? `<a href="${item.url}" target="_blank" rel="noopener">${esc(item.title)}</a>` : esc(item.title)}</div>
+    <div class="summary">${esc(item.summary)}</div>
+    <div class="reason">why: ${esc(item.reason)}</div>`;
+  if (item.draft && item.action) {
+    const label = document.createElement("span");
+    label.className = "draft-label";
+    label.textContent = "draft — edit freely; what you approve is exactly what sends";
+    const ta = document.createElement("textarea");
+    ta.value = item.draft;
+    el.append(label, ta);
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const approve = mkBtn("Approve & send", "primary", async () => {
+      approve.disabled = true;
+      try {
+        const r = await api(`/api/items/${item.id}/approve`, { draft: ta.value });
+        done(el, "✓ " + r.note);
+      } catch (e) { fail(el, e); approve.disabled = false; }
+    });
+    actions.append(approve, dismissBtn(item, el), noiseBtn(item, el));
+    el.append(actions);
+  } else {
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    actions.append(dismissBtn(item, el, "Seen — clear it"), noiseBtn(item, el));
+    el.append(actions);
+  }
+  return el;
+}
+
+function mkBtn(text, cls, onclick) {
+  const b = document.createElement("button");
+  if (cls) b.className = cls;
+  b.textContent = text;
+  b.addEventListener("click", onclick);
+  return b;
+}
+function dismissBtn(item, el, label) {
+  return mkBtn(label || "Not now", "", async () => {
+    await api(`/api/items/${item.id}/dismiss`, {});
+    el.remove();
+  });
+}
+function noiseBtn(item, el) {
+  return mkBtn("This is noise", "", async () => {
+    const r = await api(`/api/items/${item.id}/noise`, {});
+    done(el, "hidden — and the line moved: " + r.rule);
+    setTimeout(() => el.remove(), 2500);
+  });
+}
+function done(el, msg) {
+  const s = document.createElement("div");
+  s.className = "status";
+  s.textContent = msg;
+  el.append(s);
+  el.querySelectorAll("button,textarea").forEach(n => n.disabled = true);
+}
+function fail(el, e) {
+  const s = document.createElement("div");
+  s.className = "status err";
+  s.textContent = "failed: " + e.message;
+  el.append(s);
+}
+function esc(s) { const d = document.createElement("div"); d.textContent = s ?? ""; return d.innerHTML; }
+
+async function load() {
+  const data = await api("/api/queue");
+  const q = $("#queue");
+  q.replaceChildren();
+  if (data.items.length === 0) {
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.textContent = "Nothing needs you. Run triage to check again.";
+    q.append(e);
+  } else {
+    data.items.forEach(i => q.append(card(i)));
+  }
+  $("#quiet-line").innerHTML = `handled quietly: <b>${data.quiet}</b> ${data.quiet ? '· <a id="show-noise">show</a>' : ""}`;
+  const nl = $("#noise-list");
+  nl.replaceChildren(...data.noise.map(n => { const li = document.createElement("li"); li.textContent = n.title + " — " + n.summary; return li; }));
+  const toggle = $("#show-noise");
+  if (toggle) toggle.addEventListener("click", () => nl.classList.toggle("open"));
+}
+
+$("#triage-btn").addEventListener("click", async () => {
+  const b = $("#triage-btn");
+  b.disabled = true; b.textContent = "Reading your inbox…";
+  try { await api("/api/triage", {}); await load(); }
+  catch (e) { alert(e.message); }
+  finally { b.disabled = false; b.textContent = "Run triage"; }
+});
+
+load();
+</script>
+</body>
+</html>
