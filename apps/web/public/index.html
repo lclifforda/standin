@@ -215,6 +215,32 @@ function connCard(c) {
     <div class="detail">${esc(c.detail)}${c.connected ? "" : help}</div>`;
   if (c.acceptsToken) {
     if (!c.connected) {
+      if (c.id === "linear") {
+        const row = document.createElement("div");
+        row.className = "actions";
+        const msg = document.createElement("span");
+        msg.className = "msg";
+        const oauth = mkBtn("Sign in with Linear", "primary", async () => {
+          oauth.disabled = true;
+          msg.className = "msg";
+          msg.textContent = "your browser is opening — approve access on Linear's page…";
+          try {
+            const r = await api("/api/connections/linear-oauth", {});
+            msg.textContent = "connected: " + r.who;
+            await loadConnections();
+          } catch (err) {
+            msg.className = "msg err";
+            msg.textContent = err.message;
+            oauth.disabled = false;
+          }
+        });
+        row.append(oauth, msg);
+        el.append(row);
+        const or = document.createElement("div");
+        or.className = "detail";
+        or.textContent = "or paste an API key:";
+        el.append(or);
+      }
       const form = document.createElement("form");
       const input = document.createElement("input");
       input.type = "password";

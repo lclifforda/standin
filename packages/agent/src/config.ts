@@ -12,6 +12,7 @@ export interface Config {
   dbPath: string;
   model: string | undefined;
   linearApiKey: string | undefined;
+  linearMcp: boolean; // connected keylessly via Linear's official MCP (OAuth)
   slackBotToken: string | undefined;
 }
 
@@ -45,6 +46,7 @@ export function loadConfig(brainDirArg?: string): Config {
     dbPath: join(brainDir, "standin.db"),
     model: process.env.STANDIN_MODEL ?? fileCfg.model,
     linearApiKey: process.env.LINEAR_API_KEY ?? secrets.linearApiKey,
+    linearMcp: secrets.linearMcp === "true",
     slackBotToken: process.env.SLACK_BOT_TOKEN ?? secrets.slackBotToken,
   };
 }

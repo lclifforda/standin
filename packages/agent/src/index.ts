@@ -5,6 +5,7 @@ export { classify, type Classification } from "./classify.ts";
 export {
   listConnections,
   connectWithToken,
+  connectLinearOAuth,
   disconnect,
   type ConnectionStatus,
 } from "./connections.ts";

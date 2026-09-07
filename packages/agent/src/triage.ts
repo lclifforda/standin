@@ -12,6 +12,7 @@ import {
 import type { Config } from "./config.ts";
 import { classify } from "./classify.ts";
 import { ingestLinear } from "./connectors/linear.ts";
+import { ingestLinearOAuth } from "./connectors/linear-mcp.ts";
 
 export interface TriageResult {
   ingested: number;
@@ -26,8 +27,10 @@ export async function runTriage(config: Config): Promise<TriageResult> {
   const raw: RawItem[] = [];
   if (config.linearApiKey) {
     raw.push(...(await ingestLinear(config.linearApiKey)));
+  } else if (config.linearMcp) {
+    raw.push(...(await ingestLinearOAuth()));
   } else {
-    console.warn("LINEAR_API_KEY not set — skipping Linear ingest (see .env.example)");
+    console.warn("Linear not connected — open the Connections panel in the web UI");
   }
 
   const fresh = raw.filter((r) => !hasItem(db, r.source, r.externalId));

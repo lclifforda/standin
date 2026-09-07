@@ -7,6 +7,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Config } from "./config.ts";
 import { writeSecret, type SecretName } from "./secrets.ts";
+import { connectLinearOAuth as mcpConnect, linearOAuthStatus } from "./connectors/linear-mcp.ts";
 
 const run = promisify(execFile);
 
@@ -69,6 +70,8 @@ export async function listConnections(config: Config): Promise<ConnectionStatus[
   let linearWho: string | null = null;
   if (config.linearApiKey) {
     linearWho = await validateLinearKey(config.linearApiKey).catch(() => null);
+  } else if (config.linearMcp) {
+    linearWho = await linearOAuthStatus();
   }
   let slackWho: string | null = null;
   if (config.slackBotToken) {
@@ -107,8 +110,10 @@ export async function listConnections(config: Config): Promise<ConnectionStatus[
         linearWho !== null
           ? "inbox ingest + approved comments"
           : config.linearApiKey
-            ? "stored key no longer works — paste a fresh one"
-            : "paste a personal API key; it is checked against Linear before being saved",
+            ? "stored key no longer works — reconnect"
+            : config.linearMcp
+              ? "OAuth session lapsed — reconnect (opens your browser)"
+              : "sign in with Linear (opens your browser — no key to paste); or paste an API key",
       acceptsToken: true,
       tokenHelpUrl: "https://linear.app/settings/account/security",
     },
@@ -142,5 +147,20 @@ export async function connectWithToken(
 }
 
 export function disconnect(brainDir: string, id: "linear" | "slack"): void {
-  writeSecret(brainDir, id === "linear" ? "linearApiKey" : "slackBotToken", null);
+  if (id === "linear") {
+    writeSecret(brainDir, "linearApiKey", null);
+    writeSecret(brainDir, "linearMcp", null);
+  } else {
+    writeSecret(brainDir, "slackBotToken", null);
+  }
+}
+
+/**
+ * Keyless connect: opens the browser on Linear's own consent screen via the
+ * official Linear MCP server. We store only the fact of the connection.
+ */
+export async function connectLinearOAuth(brainDir: string): Promise<string> {
+  const who = await mcpConnect();
+  writeSecret(brainDir, "linearMcp", "true");
+  return who;
 }

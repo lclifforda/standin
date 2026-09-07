@@ -6,7 +6,9 @@
 import { existsSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 
-export type SecretName = "linearApiKey" | "slackBotToken";
+// linearMcp is a flag ("true"), not a secret — the OAuth tokens themselves
+// live in mcp-remote's own cache (~/.mcp-auth), never in our files.
+export type SecretName = "linearApiKey" | "slackBotToken" | "linearMcp";
 
 type Secrets = Partial<Record<SecretName, string>>;
 

@@ -26,6 +26,7 @@ import {
 } from "@standin/core";
 import {
   buildExecutors,
+  connectLinearOAuth,
   connectWithToken,
   disconnect,
   listConnections,
@@ -79,6 +80,13 @@ const server = createServer(async (req, res) => {
       json(res, 200, { events: listAudit(db) });
     } else if (req.method === "GET" && url.pathname === "/api/connections") {
       json(res, 200, { connections: await listConnections(config) });
+    } else if (req.method === "POST" && url.pathname === "/api/connections/linear-oauth") {
+      // Keyless: opens the browser on Linear's consent screen; waits for the
+      // user's approval (long timeout by design — a human is clicking).
+      const who = await connectLinearOAuth(config.brainDir);
+      refreshConfig();
+      audit(db, "connector.linked", `linear connected: ${who}`);
+      json(res, 200, { ok: true, who });
     } else if (
       req.method === "POST" &&
       (url.pathname === "/api/connections/linear" || url.pathname === "/api/connections/slack")
