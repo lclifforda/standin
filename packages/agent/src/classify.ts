@@ -69,10 +69,12 @@ export async function classify(
     prompt: buildPrompt(brain, items),
     options: {
       model,
-      allowedTools: [],
-      permissionMode: "bypassPermissions",
+      // tools: [] strips the toolset entirely — a pure completion. (An empty
+      // allowedTools would only skip permission prompts, leaving tools usable,
+      // and a stray tool call would burn the turn budget: error_max_turns.)
+      tools: [],
       settingSources: [],
-      maxTurns: 1,
+      maxTurns: 4,
     },
   });
   let text = "";
