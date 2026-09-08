@@ -241,6 +241,12 @@ const server = createServer(async (req, res) => {
         github: listBySource(db, "github").map(slim),
         slackConnected: !!config.slackBotToken,
         chat: listHomeChats(db),
+        // what actually happened — executions and closures, from the ledger
+        done: listAudit(db, 200)
+          .filter((e) =>
+            ["send.executed", "run.finished", "run.closed", "line.moved", "item.dismissed"].includes(e.type),
+          )
+          .slice(0, 10),
       });
     } else if (req.method === "GET" && url.pathname === "/api/yolo") {
       json(res, 200, {

@@ -257,6 +257,31 @@ function renderHome() {
     });
   }
 
+  // done panel: executions and closures, straight from the ledger
+  const doneEl = $("#home-done");
+  const done = state.feeds?.done ?? [];
+  if (done.length === 0) {
+    doneEl.replaceChildren(Object.assign(document.createElement("div"), {
+      className: "empty", innerHTML: "Nothing executed yet.<br>Approvals land here the moment they run.",
+    }));
+  } else {
+    if (doneEl.firstElementChild?.className === "empty") doneEl.replaceChildren();
+    syncList(doneEl, done, {
+      key: (e) => "d" + e.id,
+      sig: () => "1",
+      create: () => document.createElement("div"),
+      update: (el, e) => {
+        el.className = "feed-row";
+        const label = e.type === "send.executed" ? "sent" : e.type === "run.finished" ? "agent done"
+          : e.type === "run.closed" ? "run closed" : e.type === "line.moved" ? "line moved" : "dismissed";
+        el.innerHTML = `
+          <div class="ftop"><span>✓ ${label}</span><span class="when">${timeAgo(e.ts)}</span></div>
+          <div class="ftitle">${esc(e.detail)}</div>
+          ${e.itemId ? `<div class="frow"><a href="#/queue/item/${e.itemId}">task →</a></div>` : ""}`;
+      },
+    });
+  }
+
   renderFeeds();
 
   const thread = $("#home-thread");
