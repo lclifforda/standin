@@ -502,7 +502,10 @@ function onHash() {
     if (m) {
       state.route = fn(m);
       if (state.route.view === "connections") loadConnections();
-      if (state.route.view === "ledger") api("/api/audit").then((r) => { state.audit = r.events; renderLedger(); });
+      if (state.route.view === "ledger") {
+        api("/api/audit").then((r) => { state.audit = r.events; renderLedger(); });
+        api("/api/weeks").then((r) => { state.weeks = r; renderWeeks(); });
+      }
       render();
       return;
     }
@@ -1317,6 +1320,26 @@ function lpillClass(type) {
   if (/^(line|yolo|run)\./.test(type)) return "lpill sig";
   return "lpill";
 }
+function renderWeeks() {
+  const w = state.weeks;
+  if (!w) return;
+  const body = $("#weeks-body");
+  const head = `<tr><td class="lts">week</td><td class="lts">linear</td><td class="lts">slack</td><td class="lts">github</td><td class="lts">sent</td><td class="lts">agents</td></tr>`;
+  body.innerHTML =
+    head +
+    w.weeks
+      .map(({ week, stats }) => `
+        <tr>
+          <td class="lts">${esc(week)}${week === w.currentWeek ? " <span class='lpill acc'>so far</span>" : ""}</td>
+          <td>${stats.linear ?? 0}</td>
+          <td>${stats.slack ?? 0}</td>
+          <td>${stats.github ?? 0}</td>
+          <td><b>${stats.sent ?? 0}</b></td>
+          <td>${stats.agents ?? 0}</td>
+        </tr>`)
+      .join("");
+}
+
 function renderLedger() {
   const body = $("#ledger-body");
   syncList(body, state.audit, {

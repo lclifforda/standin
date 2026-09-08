@@ -94,6 +94,12 @@ export function openDb(path: string): DB {
   try {
     db.exec("ALTER TABLE chats ADD COLUMN proposals TEXT");
   } catch { /* column already exists */ }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS weekly_stats (
+      week TEXT PRIMARY KEY,
+      stats TEXT NOT NULL
+    );
+  `);
   return db;
 }
 
@@ -250,6 +256,101 @@ export function executedKinds(db: DB, itemIds: number[]): string[] {
     )
     .all(...itemIds) as { action_json: string }[];
   return [...new Set(rows.map((r) => (JSON.parse(r.action_json) as { kind: string }).kind))];
+}
+
+// --- retention: 7 days of specifics, then weekly shipped-numbers forever ---
+
+export function isoWeek(iso: string): string {
+  const d = new Date(iso);
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const day = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - day);
+  const y = t.getUTCFullYear();
+  const week = Math.ceil(((+t - +new Date(Date.UTC(y, 0, 1))) / 86400000 + 1) / 7);
+  return `${y}-W${String(week).padStart(2, "0")}`;
+}
+
+export type WeekStats = Record<string, number>; // linear/slack/github/sent/agents
+
+export function listWeeklyStats(db: DB): { week: string; stats: WeekStats }[] {
+  const rows = db
+    .prepare("SELECT * FROM weekly_stats ORDER BY week DESC LIMIT 26")
+    .all() as { week: string; stats: string }[];
+  return rows.map((r) => ({ week: r.week, stats: JSON.parse(r.stats) as WeekStats }));
+}
+
+/**
+ * Roll everything older than `days` into weekly counters, then prune the
+ * specifics. Open lane-3/4 items NEVER expire — old-but-unhandled must not
+ * vanish quietly. Approvals and the audit ledger are kept forever.
+ */
+export function pruneAndRollup(db: DB, days = 7): number {
+  const cutoff = new Date(Date.now() - days * 86400e3).toISOString();
+  const acc = new Map<string, WeekStats>();
+  const bump = (week: string, key: string, n = 1) => {
+    const s = acc.get(week) ?? {};
+    s[key] = (s[key] ?? 0) + n;
+    acc.set(week, s);
+  };
+
+  const olds = db
+    .prepare("SELECT id, source, created_at FROM items WHERE created_at < ? AND NOT (status = 'open' AND lane >= 3)")
+    .all(cutoff) as { id: number; source: string; created_at: string }[];
+  if (olds.length) {
+    const ids = olds.map((o) => o.id);
+    const ph = ids.map(() => "?").join(",");
+    for (const o of olds) bump(isoWeek(o.created_at), o.source);
+    const sends = db
+      .prepare(`SELECT used_at FROM approvals WHERE used_at IS NOT NULL AND item_id IN (${ph})`)
+      .all(...ids) as { used_at: string }[];
+    for (const s of sends) bump(isoWeek(s.used_at), "sent");
+    db.prepare(`DELETE FROM chats WHERE item_id IN (${ph})`).run(...ids);
+    db.prepare(`DELETE FROM items WHERE id IN (${ph})`).run(...ids);
+  }
+
+  const oldRuns = db
+    .prepare("SELECT id, updated_at FROM runs WHERE updated_at < ? AND status IN ('done','failed','archived')")
+    .all(cutoff) as { id: number; updated_at: string }[];
+  if (oldRuns.length) {
+    const rids = oldRuns.map((r) => r.id);
+    const ph = rids.map(() => "?").join(",");
+    for (const r of oldRuns) bump(isoWeek(r.updated_at), "agents");
+    db.prepare(`DELETE FROM questions WHERE run_id IN (${ph})`).run(...rids);
+    db.prepare(`DELETE FROM runs WHERE id IN (${ph})`).run(...rids);
+  }
+
+  for (const [week, add] of acc) {
+    const existing = db.prepare("SELECT stats FROM weekly_stats WHERE week = ?").get(week) as
+      | { stats: string }
+      | undefined;
+    const merged: WeekStats = existing ? (JSON.parse(existing.stats) as WeekStats) : {};
+    for (const [k, v] of Object.entries(add)) merged[k] = (merged[k] ?? 0) + v;
+    db.prepare(
+      "INSERT INTO weekly_stats (week, stats) VALUES (?, ?) ON CONFLICT(week) DO UPDATE SET stats = excluded.stats",
+    ).run(week, JSON.stringify(merged));
+  }
+  return olds.length + oldRuns.length;
+}
+
+/** Current (unpruned) activity bucketed the same way, to show partial weeks. */
+export function liveWeekStats(db: DB): { week: string; stats: WeekStats }[] {
+  const acc = new Map<string, WeekStats>();
+  const bump = (week: string, key: string) => {
+    const s = acc.get(week) ?? {};
+    s[key] = (s[key] ?? 0) + 1;
+    acc.set(week, s);
+  };
+  for (const r of db.prepare("SELECT source, created_at FROM items").all() as { source: string; created_at: string }[])
+    bump(isoWeek(r.created_at), r.source);
+  for (const r of db
+    .prepare("SELECT a.used_at FROM approvals a JOIN items i ON i.id = a.item_id WHERE a.used_at IS NOT NULL")
+    .all() as { used_at: string }[])
+    bump(isoWeek(r.used_at), "sent");
+  for (const r of db
+    .prepare("SELECT updated_at FROM runs WHERE status IN ('done','archived')")
+    .all() as { updated_at: string }[])
+    bump(isoWeek(r.updated_at), "agents");
+  return [...acc.entries()].map(([week, stats]) => ({ week, stats }));
 }
 
 // --- audit ---

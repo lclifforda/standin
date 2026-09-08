@@ -26,6 +26,10 @@ import {
   insertHomeChat,
   listBySource,
   listHomeChats,
+  isoWeek,
+  listWeeklyStats,
+  liveWeekStats,
+  pruneAndRollup,
   resolveHomeChat,
   listChats,
   pendingQuestion,
@@ -72,6 +76,10 @@ for (const r of listRuns(db, { limit: 200 })) {
     finishRunAsInterrupted(r.id, r.sessionId);
   }
 }
+// 7-day retention: specifics roll into weekly shipped-numbers, then prune.
+const prunedAtBoot = pruneAndRollup(db);
+if (prunedAtBoot > 0) audit(db, "retention.rolled", `${prunedAtBoot} aged records rolled into weekly stats`);
+
 function finishRunAsInterrupted(id: number, sessionId: string | null): void {
   const note = sessionId
     ? "⚠ Interrupted by a server restart — the agent process died mid-run. Its session survived: use “Answer & continue” below to pick up where it left off, or close this run."
@@ -400,7 +408,21 @@ const server = createServer(async (req, res) => {
       refreshConfig();
       audit(db, "connector.unlinked", `${id} disconnected`);
       json(res, 200, { ok: true });
+    } else if (req.method === "GET" && url.pathname === "/api/weeks") {
+      // stored (rolled) weeks merged with live partial weeks
+      const merged = new Map<string, Record<string, number>>();
+      for (const { week, stats } of [...listWeeklyStats(db), ...liveWeekStats(db)]) {
+        const s = merged.get(week) ?? {};
+        for (const [k, v] of Object.entries(stats)) s[k] = (s[k] ?? 0) + v;
+        merged.set(week, s);
+      }
+      const weeks = [...merged.entries()]
+        .map(([week, stats]) => ({ week, stats }))
+        .sort((a, b) => b.week.localeCompare(a.week))
+        .slice(0, 12);
+      json(res, 200, { weeks, currentWeek: isoWeek(new Date().toISOString()) });
     } else if (req.method === "POST" && url.pathname === "/api/triage") {
+      pruneAndRollup(db);
       const r = await runTriage(config);
       // Autopilot: every surfaced task gets its agent automatically. Safe by
       // design — the pipeline's ALIGN checkpoint stops each run at a brief
