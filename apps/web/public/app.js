@@ -189,6 +189,72 @@ function renderHome() {
   $("#sitline").innerHTML =
     `Right now: ${bits.join(" · ")}${state.queue.quiet ? ` · ${state.queue.quiet} handled quietly` : ""} — <a href="#/queue">open the queue</a>`;
 
+  // needs-you panel: top tasks, one click into their detail
+  const tasks = t.slice(0, 6).map((it, ix) => ({ it, rank: ix + 1 }));
+  const tasksEl = $("#home-tasks");
+  if (tasks.length === 0) {
+    tasksEl.replaceChildren(Object.assign(document.createElement("div"), {
+      className: "empty", innerHTML: "<b>Queue clear.</b>",
+    }));
+  } else {
+    if (tasksEl.firstElementChild?.className === "empty") tasksEl.replaceChildren();
+    syncList(tasksEl, tasks, {
+      key: (w) => "ht" + w.it.id,
+      sig: (w) => [w.rank, w.it.lane, w.it.count, (w.it.sent ?? []).join(","), !!w.it.draft, timeAgo(w.it.createdAt)].join("|"),
+      create: (w) => {
+        const el = document.createElement("div");
+        el.setAttribute("role", "button");
+        el.tabIndex = 0;
+        const go = () => { location.hash = `#/queue/item/${w.it.id}`; };
+        el.addEventListener("click", go);
+        el.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+        return el;
+      },
+      update: (el, w) => {
+        el.className = "row lane" + w.it.lane;
+        const badges = [];
+        if (w.it.draft) badges.push(`<span class="tag acc">draft ready</span>`);
+        for (const k of w.it.sent ?? [])
+          badges.push(`<span class="tag acc">${k.split(".")[0]} ✓</span>`);
+        el.innerHTML = `
+          <div class="rtop"><span>#${w.rank}</span><span class="ltag">${w.it.lane === 4 ? "escalate" : "needs you"}</span><span class="when">${timeAgo(w.it.createdAt)}</span></div>
+          <div class="rtitle">${esc(w.it.title)}</div>
+          ${badges.length ? `<div class="rbadges">${badges.join("")}</div>` : ""}`;
+      },
+    });
+  }
+
+  // agents panel: live runs, one click into their detail
+  const runsEl = $("#home-runs");
+  const runs = state.runs.slice(0, 5);
+  if (runs.length === 0) {
+    runsEl.replaceChildren(Object.assign(document.createElement("div"), {
+      className: "empty", innerHTML: "No agents running.<br><b>Go do it</b> on a task.",
+    }));
+  } else {
+    if (runsEl.firstElementChild?.className === "empty") runsEl.replaceChildren();
+    syncList(runsEl, runs, {
+      key: (r) => "hr" + r.id,
+      sig: (r) => [r.updatedAt, r.status].join("|"),
+      create: (r) => {
+        const el = document.createElement("div");
+        el.setAttribute("role", "button");
+        el.tabIndex = 0;
+        const go = () => { location.hash = `#/work/run/${r.id}`; };
+        el.addEventListener("click", go);
+        el.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+        return el;
+      },
+      update: (el, r) => {
+        el.className = "row" + (r.status === "waiting" ? " lane4" : r.status === "running" ? " lane3" : "");
+        el.innerHTML = `
+          <div class="rtop"><span class="ltag">agent</span><span class="when">${timeAgo(r.updatedAt)}</span></div>
+          <div class="rtitle">${esc(r.title)}</div>
+          <div class="rbadges"><span class="tag ${r.status === "waiting" ? "sig pulse" : r.status === "running" ? "acc pulse" : ""}">${PILL[r.status]}</span></div>`;
+      },
+    });
+  }
+
   const thread = $("#home-thread");
   syncList(thread, state.homeChat, {
     key: (m) => m.id,
