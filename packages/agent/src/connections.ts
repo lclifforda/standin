@@ -19,6 +19,7 @@ export interface ConnectionStatus {
   detail: string; // next step when not connected
   acceptsToken: boolean; // whether the UI shows a paste-token form
   tokenHelpUrl: string | null;
+  steps?: string[]; // plain-language setup walkthrough, shown while disconnected
 }
 
 export async function validateLinearKey(apiKey: string): Promise<string> {
@@ -97,9 +98,16 @@ export async function listConnections(config: Config): Promise<ConnectionStatus[
       who: gh.who,
       detail: gh.connected
         ? "PR comments and merges go through your gh login"
-        : "run `gh auth login` in a terminal (device flow, no token pasting)",
+        : "sign in through your browser — no token pasting:",
       acceptsToken: false,
       tokenHelpUrl: null,
+      steps: gh.connected
+        ? undefined
+        : [
+            "Install the GitHub CLI if needed: brew install gh",
+            "In a terminal run: gh auth login → pick GitHub.com → HTTPS → “Login with a web browser”, and follow the code it shows.",
+            "Come back here — the dot turns green on the next refresh.",
+          ],
     },
     {
       id: "linear",
@@ -125,9 +133,19 @@ export async function listConnections(config: Config): Promise<ConnectionStatus[
       detail:
         slackWho !== null
           ? "approved messages send through your bot"
-          : "optional in v1 — paste a bot token (xoxb-…) to enable approved Slack sends",
+          : "optional — lets Approve & send post to Slack. One-time setup (~5 min, may need an admin's ok):",
       acceptsToken: true,
       tokenHelpUrl: "https://api.slack.com/apps",
+      steps:
+        slackWho !== null
+          ? undefined
+          : [
+              "Open api.slack.com/apps → “Create New App” → “From scratch”. Name it “standin”, pick your workspace.",
+              "In the left sidebar open “OAuth & Permissions”, scroll to Scopes, and under Bot Token Scopes add exactly one: chat:write. Nothing else — it can only post, never read.",
+              "At the top of that same page click “Install to Workspace”. If your workspace is admin-restricted you'll see “Request to Install” instead — send it with a note like: “personal assistant bot, chat:write only, posts only messages I explicitly approve.” Wait for the admin's ok, then install.",
+              "After installing, copy the “Bot User OAuth Token” (starts with xoxb-) from that page and paste it below — it's validated with Slack before anything is saved.",
+              "In Slack, go to the channel it should post in (your profile's Delivery channel) and type: /invite @standin — a bot can only post where it's been invited.",
+            ],
     },
   ];
 }
