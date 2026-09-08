@@ -10,9 +10,53 @@ import {
   listItems,
   listRuns,
   loadBrain,
+  type ActionProposal,
   type ChatMessage,
   type DB,
 } from "@standin/core";
+
+export interface AskResult {
+  text: string;
+  proposals: ActionProposal[] | null;
+}
+
+const PROPOSAL_KINDS = new Set([
+  "linear.comment",
+  "linear.status",
+  "github.comment",
+  "github.close",
+  "github.merge",
+  "slack.message",
+  "agent.run",
+]);
+
+/** The agent may end its reply with `PROPOSALS: [...]` — parse and validate. */
+export function parseProposals(raw: string): AskResult {
+  const m = raw.match(/\nPROPOSALS:\s*(\[[\s\S]*?\])\s*$/);
+  if (!m) return { text: raw.trim(), proposals: null };
+  try {
+    const arr = JSON.parse(m[1]!) as ActionProposal[];
+    const ok = arr
+      .filter((p) => p && typeof p.kind === "string" && PROPOSAL_KINDS.has(p.kind) && typeof p.label === "string")
+      .slice(0, 3);
+    return { text: raw.slice(0, m.index).trim(), proposals: ok.length ? ok : null };
+  } catch {
+    return { text: raw.trim(), proposals: null };
+  }
+}
+
+const PROPOSAL_GUIDE = `
+When the owner asks you to act — or one obvious action would resolve this — end your reply with ONE line:
+PROPOSALS: [{"kind":"...","label":"...", ...params}]
+Allowed kinds and their required params:
+  {"kind":"linear.comment","issueId":"ABC-123","body":"...","label":"Comment on ABC-123"}
+  {"kind":"linear.status","issueId":"ABC-123","status":"In Review","label":"Move ABC-123 to In Review"}
+  {"kind":"github.comment","prUrl":"https://github.com/...","body":"...","label":"Comment on the PR"}
+  {"kind":"github.close","prUrl":"https://github.com/...","label":"Close the PR"}
+  {"kind":"github.merge","prUrl":"https://github.com/...","label":"Merge the PR"}
+  {"kind":"slack.message","channel":"C0123...","text":"...","label":"Reply in #channel"}
+  {"kind":"agent.run","label":"Start a coding agent on this"}
+Rules: at most 3 proposals; every param fully specified from real context (never invent ids/urls); bodies written in the owner's voice; nothing executes until the owner clicks — say what you propose in the text too. No proposals line when just answering a question.`;
 import type { Config } from "./config.ts";
 import { getIssueContext } from "./connectors/linear.ts";
 import { getIssueContextOAuth } from "./connectors/linear-mcp.ts";
@@ -113,7 +157,8 @@ export async function askAboutItem(
   itemId: number,
   question: string,
   history: ChatMessage[] = [],
-): Promise<string> {
+  taskContext = "",
+): Promise<AskResult> {
   const item = getItem(db, itemId);
   if (!item) throw new Error(`no item #${itemId}`);
   const brain = loadBrain(config.brainDir);
@@ -124,21 +169,24 @@ export async function askAboutItem(
     .map((m) => `${m.role === "owner" ? "OWNER" : "YOU"}: ${m.content}`)
     .join("\n\n");
 
-  const prompt = `You are the owner's virtual stand-in. They are looking at ONE inbox item and chatting with you about it. Answer plainly and concretely — who's involved, what happened, what their options are. Lead with the answer. Never invent facts; if the context doesn't say, say so. Do not send anything; you are read-only.
+  const prompt = `You are this task's agent — the owner's stand-in on ONE task. Talk it through with them: who's involved, what happened, what the options are. Lead with the answer. Never invent facts; if the context doesn't say, say so. You never execute directly: you PROPOSE actions and the owner's click approves them through the audited contract.
 
-OWNER PROFILE (for what matters to them):
+OWNER PROFILE (their voice for any drafted body):
 ${brain.profile}
 
-THE INBOX ITEM:
+THE TASK (anchor item):
 ${item.title}
 ${item.summary}
 ${item.body ?? ""}
 ${item.url ?? ""}
+${taskContext ? `\nEVERYTHING GROUPED UNDER THIS TASK:\n${taskContext}` : ""}
 
 LIVE SOURCE CONTEXT (the actual ticket, people, and comments):
 ${sourceContext || "(no live context could be fetched — say so and answer from the item alone)"}
 
 ${conversation ? `THE CONVERSATION SO FAR:\n${conversation}\n` : ""}
+${PROPOSAL_GUIDE}
+
 OWNER'S NEW MESSAGE:
 ${question}`;
 
@@ -150,7 +198,7 @@ ${question}`;
     if (message.type === "result") {
       if ((message as { subtype: string }).subtype !== "success")
         throw new Error(`ask failed: ${(message as { subtype: string }).subtype}`);
-      return (message as unknown as { result: string }).result;
+      return parseProposals((message as unknown as { result: string }).result);
     }
   }
   throw new Error("ask ended without a result");

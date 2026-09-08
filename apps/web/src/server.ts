@@ -16,6 +16,7 @@ import {
   executeApproved,
   answerQuestion,
   executedKinds,
+  getChat,
   getItem,
   getQuestion,
   getRun,
@@ -36,7 +37,10 @@ import {
   mintApproval,
   openDb,
   setItemStatus,
+  setRunStatus,
   setSetting,
+  updateChatProposals,
+  type ActionSpec,
   updateItemDraft,
   withBody,
 } from "@standin/core";
@@ -65,6 +69,48 @@ const MIME: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
 };
+
+/** The one grouping rule (queue, autopilot, and task chat all share it). */
+function groupKeyOf(i: { source: string; title: string; body: string | null; url: string | null; externalId: string }): string {
+  const ident =
+    i.source === "linear"
+      ? issueIdentifier({ title: i.title, body: null, url: i.url })
+      : issueIdentifier({ title: i.title, body: i.body, url: null });
+  return ident ?? (i.source === "linear" ? `linear-title:${i.title}` : `${i.source}:${i.externalId}`);
+}
+
+/** Turn an agent proposal into a concrete ActionSpec — or refuse. */
+function proposalToAction(p: Record<string, unknown>): ActionSpec | null {
+  const s = (k: string) => (typeof p[k] === "string" && (p[k] as string).trim() ? (p[k] as string) : null);
+  switch (p.kind) {
+    case "linear.comment": {
+      const issueId = s("issueId"), body = s("body");
+      return issueId && body ? { kind: "linear.comment", issueId, body } : null;
+    }
+    case "linear.status": {
+      const issueId = s("issueId"), status = s("status");
+      return issueId && status ? { kind: "linear.status", issueId, status } : null;
+    }
+    case "github.comment": {
+      const prUrl = s("prUrl"), body = s("body");
+      return prUrl && body ? { kind: "github.comment", prUrl, body } : null;
+    }
+    case "github.close": {
+      const prUrl = s("prUrl");
+      return prUrl ? { kind: "github.close", prUrl } : null;
+    }
+    case "github.merge": {
+      const prUrl = s("prUrl");
+      return prUrl ? { kind: "github.merge", prUrl } : null;
+    }
+    case "slack.message": {
+      const channel = s("channel"), text = s("text");
+      return channel && text ? { kind: "slack.message", channel, text } : null;
+    }
+    default:
+      return null;
+  }
+}
 
 function serveStatic(res: ServerResponse, urlPath: string): void {
   const rel = urlPath === "/" ? "index.html" : decodeURIComponent(urlPath.slice(1));
@@ -124,16 +170,7 @@ const server = createServer(async (req, res) => {
       }));
       const groups = new Map<string, typeof items>();
       for (const i of items) {
-        // Linear: ticket id from the URL (never the body — comment bodies
-        // mention OTHER tickets), exact-title fallback. Slack/GitHub: a ticket
-        // id in their text pulls them INTO that ticket's task — the
-        // cross-source dot-connecting.
-        const ident =
-          i.source === "linear"
-            ? issueIdentifier({ title: i.title, body: null, url: i.url })
-            : issueIdentifier({ title: i.title, body: i.body, url: null });
-        const key =
-          ident ?? (i.source === "linear" ? `linear-title:${i.title}` : `${i.source}:${i.externalId}`);
+        const key = groupKeyOf(i);
         (groups.get(key) ?? groups.set(key, []).get(key)!).push(i);
       }
       const tasks = [...groups.entries()].map(([key, list]) => {
@@ -242,11 +279,46 @@ const server = createServer(async (req, res) => {
       json(res, 200, { on: body.on === true });
     } else if (req.method === "GET" && url.pathname === "/api/runs") {
       const itemIdParam = url.searchParams.get("itemId");
-      const runs = listRuns(db, itemIdParam ? { itemId: Number(itemIdParam) } : {}).map((r) => ({
-        ...r,
-        question: r.status === "waiting" ? pendingQuestion(db, r.id) : null,
-      }));
+      const runs = listRuns(db, itemIdParam ? { itemId: Number(itemIdParam) } : {})
+        .filter((r) => r.status !== "archived") // closed runs leave every list
+        .map((r) => ({
+          ...r,
+          question: r.status === "waiting" ? pendingQuestion(db, r.id) : null,
+        }));
       json(res, 200, { runs });
+    } else if (req.method === "POST" && url.pathname.match(/^\/api\/chats\/\d+\/approve$/)) {
+      // The owner clicked an agent-proposed action: that click IS the yes.
+      const chatId = Number(url.pathname.split("/")[3]);
+      const body = await readBody(req);
+      const idx = Number(body.index ?? 0);
+      const msg = getChat(db, chatId);
+      const proposal = msg?.proposals?.[idx];
+      if (!msg || !proposal) return json(res, 404, { error: "no such proposal (already used?)" });
+      let note: string;
+      if (proposal.kind === "agent.run") {
+        if (getSetting(db, "yolo") !== "on")
+          return json(res, 403, { error: "yolo is off — flip it to let agents work" });
+        startWorkRun(db, config, { itemId: msg.itemId });
+        note = "agent started — it will brief you before touching anything";
+      } else {
+        const action = proposalToAction(proposal);
+        if (!action) return json(res, 400, { error: `proposal is missing params for ${proposal.kind}` });
+        const approval = mintApproval(db, msg.itemId, action, "web-ui:proposal");
+        note = await executeApproved(db, approval.id, executors);
+      }
+      const remaining = (msg.proposals ?? []).filter((_, i) => i !== idx);
+      updateChatProposals(db, chatId, remaining);
+      insertChat(db, msg.itemId, "standin", `✓ ${note}`);
+      json(res, 200, { ok: true, note, chat: listChats(db, msg.itemId) });
+    } else if (req.method === "POST" && url.pathname.match(/^\/api\/runs\/\d+\/close$/)) {
+      const runId = Number(url.pathname.split("/")[3]);
+      const run = getRun(db, runId);
+      if (!run) return json(res, 404, { error: "no such run" });
+      if (run.status === "running" || run.status === "waiting")
+        return json(res, 400, { error: "run is still active — answer or wait, then close" });
+      setRunStatus(db, runId, "archived");
+      audit(db, "run.closed", `run #${runId} closed by owner`);
+      json(res, 200, { ok: true });
     } else if (req.method === "POST" && url.pathname.match(/^\/api\/questions\/\d+\/answer$/)) {
       const qId = Number(url.pathname.split("/")[3]);
       const body = await readBody(req);
@@ -316,12 +388,7 @@ const server = createServer(async (req, res) => {
         const open = listItems(db, { lanes: [3, 4] });
         const byKey = new Map<string, typeof open>();
         for (const i of open) {
-          const ident =
-            i.source === "linear"
-              ? issueIdentifier({ title: i.title, body: null, url: i.url })
-              : issueIdentifier({ title: i.title, body: i.body, url: null });
-          const key =
-            ident ?? (i.source === "linear" ? `linear-title:${i.title}` : `${i.source}:${i.externalId}`);
+          const key = groupKeyOf(i);
           (byKey.get(key) ?? byKey.set(key, []).get(key)!).push(i);
         }
         for (const list of byKey.values()) {
@@ -347,10 +414,17 @@ const server = createServer(async (req, res) => {
         // Persist both sides immediately, answer asynchronously: the thread
         // survives a reload even mid-answer, and the UI polls until resolved.
         const history = listChats(db, id);
+        // hand the agent the whole grouped task, not just the anchor item
+        const members = listItems(db, { lanes: [3, 4] }).filter(
+          (x) => groupKeyOf(x) === groupKeyOf(item),
+        );
+        const taskContext = members
+          .map((m) => `- [${m.source}] ${m.title}${m.url ? ` (${m.url})` : ""} — ${m.summary}`)
+          .join("\n");
         insertChat(db, id, "owner", question);
         const pendingId = insertChat(db, id, "standin", "", "pending");
-        void askAboutItem(db, config, id, question, history)
-          .then((answer) => resolveChat(db, pendingId, answer, "done"))
+        void askAboutItem(db, config, id, question, history, taskContext)
+          .then((r) => resolveChat(db, pendingId, r.text, "done", r.proposals))
           .catch((err) =>
             resolveChat(db, pendingId, String(err instanceof Error ? err.message : err), "failed"),
           );

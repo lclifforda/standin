@@ -90,6 +90,10 @@ export function openDb(path: string): DB {
       created_at TEXT NOT NULL
     );
   `);
+  // migration: chats.proposals (agent-proposed actions awaiting the owner's yes)
+  try {
+    db.exec("ALTER TABLE chats ADD COLUMN proposals TEXT");
+  } catch { /* column already exists */ }
   return db;
 }
 
@@ -282,7 +286,7 @@ export interface WorkRun {
   id: number;
   itemId: number | null;
   title: string;
-  status: "running" | "waiting" | "done" | "failed";
+  status: "running" | "waiting" | "done" | "failed" | "archived";
   log: string;
   report: string | null;
   sessionId: string | null;
@@ -395,24 +399,51 @@ export function answerQuestion(db: DB, id: number, answer: string): void {
 
 // --- item chats (persistent per-card conversations with the stand-in) ---
 
+/** An action the task's agent proposed in chat; the owner's click approves it. */
+export interface ActionProposal {
+  kind: string; // an ActionSpec kind, or "agent.run" to start a coding agent
+  label: string;
+  [param: string]: unknown;
+}
+
 export interface ChatMessage {
   id: number;
   itemId: number;
   role: "owner" | "standin";
   content: string;
   status: "done" | "pending" | "failed";
+  proposals: ActionProposal[] | null;
   createdAt: string;
 }
 
 function rowToChat(r: Record<string, unknown>): ChatMessage {
+  let proposals: ActionProposal[] | null = null;
+  if (r.proposals) {
+    try { proposals = JSON.parse(r.proposals as string) as ActionProposal[]; } catch { /* ignore */ }
+  }
   return {
     id: r.id as number,
     itemId: r.item_id as number,
     role: r.role as ChatMessage["role"],
     content: r.content as string,
     status: r.status as ChatMessage["status"],
+    proposals: proposals?.length ? proposals : null,
     createdAt: r.created_at as string,
   };
+}
+
+export function getChat(db: DB, id: number): ChatMessage | null {
+  const r = db.prepare("SELECT * FROM chats WHERE id = ?").get(id) as
+    | Record<string, unknown>
+    | undefined;
+  return r ? rowToChat(r) : null;
+}
+
+export function updateChatProposals(db: DB, id: number, proposals: ActionProposal[]): void {
+  db.prepare("UPDATE chats SET proposals = ? WHERE id = ?").run(
+    proposals.length ? JSON.stringify(proposals) : null,
+    id,
+  );
 }
 
 export function insertChat(
@@ -433,8 +464,14 @@ export function resolveChat(
   id: number,
   content: string,
   status: "done" | "failed",
+  proposals: ActionProposal[] | null = null,
 ): void {
-  db.prepare("UPDATE chats SET content = ?, status = ? WHERE id = ?").run(content, status, id);
+  db.prepare("UPDATE chats SET content = ?, status = ?, proposals = ? WHERE id = ?").run(
+    content,
+    status,
+    proposals?.length ? JSON.stringify(proposals) : null,
+    id,
+  );
 }
 
 export function listChats(db: DB, itemId: number): ChatMessage[] {

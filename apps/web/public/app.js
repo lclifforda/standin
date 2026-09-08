@@ -360,23 +360,8 @@ function renderFeeds() {
           } catch (err) { toast(err.message, "err"); b.disabled = false; }
         });
         row.append(b);
-        // source-native quick actions — each is an approval + ledger entry
-        if (elId === "#feed-linear") {
-          row.append(
-            armBtn("→ In Review", () => quickAction(i.id, "linear.status", "In Review")),
-            armBtn("→ Done", () => quickAction(i.id, "linear.status", "Done")),
-            miniInput(row, "comment on the ticket…", "", (t) => quickAction(i.id, "linear.comment", t)),
-          );
-        } else if (elId === "#feed-github") {
-          row.append(
-            miniInput(row, "comment on the PR…", "@aria please review this PR 🙏", (t) => quickAction(i.id, "github.comment", t)),
-            armBtn("close PR", () => quickAction(i.id, "github.close")),
-          );
-        } else if (elId === "#feed-slack") {
-          row.append(
-            miniInput(row, "reply in the channel…", "", (t) => quickAction(i.id, "slack.message", t)),
-          );
-        }
+        // feeds are for glancing; ACTING happens in the task's conversation —
+        // "in queue →" (or ▶ agent) is the door.
         if (i.status === "open") {
           row.append(armBtn("discard", async () => {
             await api(`/api/items/${i.id}/dismiss`, {});
@@ -854,8 +839,31 @@ function fillBubble(el, m, task) {
       retry.style.padding = "2px 10px";
       el.append(retry);
     }
-  } else if (m.role === "standin") el.append(md(m.content));
-  else el.textContent = m.content;
+  } else if (m.role === "standin") {
+    el.append(md(m.content));
+    // agent-proposed actions: the click is the yes, executed via the contract
+    if (m.proposals?.length && task) {
+      const row = document.createElement("div");
+      row.className = "actions";
+      row.style.marginTop = "8px";
+      m.proposals.forEach((p, index) => {
+        const b = mkBtn(p.label, "primary", async () => {
+          b.disabled = true;
+          try {
+            const r = await api(`/api/chats/${m.id}/approve`, { index });
+            toast("✓ " + r.note);
+            const t = state.queue.tasks.find((x) => x.itemIds.includes(m.itemId));
+            if (t) t.chat = r.chat;
+            render();
+            scheduleTick(true);
+          } catch (e) { toast(e.message, "err"); b.disabled = false; }
+        });
+        b.style.fontSize = "12px";
+        row.append(b);
+      });
+      el.append(row);
+    }
+  } else el.textContent = m.content;
 }
 
 function updateQueueDetail(item) {
@@ -900,7 +908,7 @@ function updateQueueDetail(item) {
   const nearBottom = qd.scroll.scrollHeight - qd.scroll.scrollTop - qd.scroll.clientHeight < 60;
   syncList(qd.thread, chat, {
     key: (m) => "m" + m.id,
-    sig: (m) => `${m.status}|${(m.content ?? "").length}`,
+    sig: (m) => `${m.status}|${(m.content ?? "").length}|${m.proposals?.length ?? 0}`,
     create: (m) => bubbleNode(m, item),
     update: (el, m) => fillBubble(el, m, item),
   });
@@ -943,7 +951,7 @@ async function renderTerminal(pane, id) {
 }
 
 /* ============ view: work ============ */
-const PILL = { running: "working…", waiting: "needs you", done: "done", failed: "failed" };
+const PILL = { running: "working…", waiting: "needs you", done: "done", failed: "failed", archived: "closed" };
 let wd = { key: null };
 
 function renderWorkList() {
@@ -1032,6 +1040,16 @@ function buildWorkDetail(pane, run) {
   wd.report.hidden = true;
   scroll.append(wd.report);
 
+  wd.closeBtn = mkBtn("Close run", "ghost", async () => {
+    try {
+      await api(`/api/runs/${run.id}/close`, {});
+      toast("Run closed");
+      state.runs = state.runs.filter((r) => r.id !== run.id);
+      location.hash = "#/work";
+    } catch (e) { toast(e.message, "err"); }
+  });
+  wd.closeBtn.hidden = true;
+
   wd.cont = document.createElement("form");
   wd.cont.className = "continue";
   wd.cont.hidden = true;
@@ -1053,6 +1071,10 @@ function buildWorkDetail(pane, run) {
     send.disabled = false;
   });
 
+  const closeRow = document.createElement("div");
+  closeRow.className = "actions";
+  closeRow.append(wd.closeBtn);
+  scroll.append(closeRow);
   pane.replaceChildren(scroll, wd.cont);
 }
 
@@ -1109,7 +1131,8 @@ function updateWorkDetail(run) {
     wd.reportRev = run.updatedAt;
     wd.report.replaceChildren(md(run.report));
   }
-  wd.cont.hidden = !(!active && run.sessionId);
+  wd.cont.hidden = !(!active && run.status !== "archived" && run.sessionId);
+  wd.closeBtn.hidden = !(run.status === "done" || run.status === "failed");
 }
 
 /* ============ view: connections ============ */
