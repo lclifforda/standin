@@ -345,6 +345,10 @@ export function markRunResumed(db: DB, id: number): void {
   );
 }
 
+export function setRunSession(db: DB, id: number, sessionId: string): void {
+  db.prepare("UPDATE runs SET session_id = ? WHERE id = ?").run(sessionId, id);
+}
+
 export function setRunStatus(db: DB, id: number, status: WorkRun["status"]): void {
   db.prepare("UPDATE runs SET status = ?, updated_at = ? WHERE id = ?").run(
     status,

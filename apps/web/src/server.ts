@@ -16,6 +16,7 @@ import {
   executeApproved,
   answerQuestion,
   executedKinds,
+  finishRun,
   getChat,
   getItem,
   getQuestion,
@@ -62,6 +63,22 @@ import {
 let config = loadConfig(process.env.STANDIN_BRAIN);
 const db = openDb(config.dbPath);
 let executors = buildExecutors(config);
+
+// Zombie sweep: agent runs live inside this process, so anything still marked
+// running/waiting at boot belonged to a dead process. Mark it honestly instead
+// of leaving a forever-"waiting" ghost the owner can talk to with nobody home.
+for (const r of listRuns(db, { limit: 200 })) {
+  if (r.status === "running" || r.status === "waiting") {
+    finishRunAsInterrupted(r.id, r.sessionId);
+  }
+}
+function finishRunAsInterrupted(id: number, sessionId: string | null): void {
+  const note = sessionId
+    ? "⚠ Interrupted by a server restart — the agent process died mid-run. Its session survived: use “Answer & continue” below to pick up where it left off, or close this run."
+    : "⚠ Interrupted by a server restart — the agent process died mid-run before its session could be saved. Close this run and start a fresh agent on the task.";
+  finishRun(db, id, "failed", note, sessionId);
+  audit(db, "run.failed", `run #${id} marked interrupted at boot`);
+}
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "public");
 const MIME: Record<string, string> = {

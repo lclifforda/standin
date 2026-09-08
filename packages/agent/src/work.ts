@@ -25,6 +25,7 @@ import {
   insertRun,
   loadBrain,
   markRunResumed,
+  setRunSession,
   setRunStatus,
   type DB,
   type InboxItem,
@@ -160,6 +161,8 @@ async function drive(
     for await (const message of q) {
       if (message.type === "system" && "session_id" in message) {
         sessionId = (message as { session_id: string }).session_id;
+        // persist immediately: if the server dies mid-run, the run stays resumable
+        setRunSession(db, runId, sessionId);
       } else if (message.type === "assistant") {
         const blocks = (message as { message: { content: unknown } }).message.content;
         if (Array.isArray(blocks)) {
