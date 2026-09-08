@@ -170,6 +170,14 @@ export function listItems(db: DB, opts: { lanes?: Lane[]; status?: ItemStatus } 
   return rows.map(rowToItem);
 }
 
+/** Latest ingested items for one source, any lane/status — the raw feed. */
+export function listBySource(db: DB, source: string, limit = 8): InboxItem[] {
+  const rows = db
+    .prepare("SELECT * FROM items WHERE source = ? ORDER BY created_at DESC LIMIT ?")
+    .all(source, limit) as Record<string, unknown>[];
+  return rows.map(rowToItem);
+}
+
 export function laneCounts(db: DB): Record<Lane, number> {
   const rows = db
     .prepare("SELECT lane, COUNT(*) AS n FROM items WHERE status = 'open' GROUP BY lane")

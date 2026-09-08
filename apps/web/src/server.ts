@@ -21,6 +21,7 @@ import {
   getRun,
   getSetting,
   insertChat,
+  listBySource,
   listChats,
   pendingQuestion,
   resolveChat,
@@ -189,6 +190,17 @@ const server = createServer(async (req, res) => {
         : json(res, 404, { error: `no item #${id}` });
     } else if (req.method === "GET" && url.pathname === "/api/audit") {
       json(res, 200, { events: listAudit(db) });
+    } else if (req.method === "GET" && url.pathname === "/api/feeds") {
+      const slim = (i: ReturnType<typeof listBySource>[number]) => ({
+        id: i.id, title: i.title, actor: i.actor, url: i.url,
+        kind: i.kind, lane: i.lane, status: i.status, createdAt: i.createdAt,
+      });
+      json(res, 200, {
+        linear: listBySource(db, "linear").map(slim),
+        slack: listBySource(db, "slack").map(slim),
+        github: listBySource(db, "github").map(slim),
+        slackConnected: !!config.slackBotToken,
+      });
     } else if (req.method === "GET" && url.pathname === "/api/yolo") {
       json(res, 200, {
         on: getSetting(db, "yolo") === "on",

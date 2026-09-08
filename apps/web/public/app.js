@@ -125,6 +125,7 @@ async function tick() {
     serverBoot = q.v ?? serverBoot;
     state.queue = { tasks: q.tasks ?? [], quiet: q.quiet ?? 0, noise: q.noise ?? [] };
     state.runs = r.runs ?? [];
+    if (state.route.view === "home") state.feeds = await api("/api/feeds");
     if (state.route.view === "ledger") state.audit = (await api("/api/audit")).events;
   } catch { /* server hiccup — keep last state */ }
   ticking = false;
@@ -255,6 +256,8 @@ function renderHome() {
     });
   }
 
+  renderFeeds();
+
   const thread = $("#home-thread");
   syncList(thread, state.homeChat, {
     key: (m) => m.id,
@@ -268,6 +271,51 @@ function renderHome() {
       else el.textContent = m.content;
     },
   });
+}
+
+function renderFeeds() {
+  const f = state.feeds;
+  if (!f) return;
+  const paint = (elId, items, emptyHtml) => {
+    const el = $(elId);
+    if (!items?.length) {
+      el.replaceChildren(Object.assign(document.createElement("div"), { className: "empty", innerHTML: emptyHtml }));
+      return;
+    }
+    if (el.firstElementChild?.className === "empty") el.replaceChildren();
+    syncList(el, items, {
+      key: (i) => "f" + i.id,
+      sig: (i) => `${i.status}|${timeAgo(i.createdAt)}`,
+      create: () => document.createElement("div"),
+      update: (el2, i) => {
+        el2.className = "feed-row";
+        el2.innerHTML = `
+          <div class="ftop"><span>${esc(i.actor ?? i.kind)}</span><span class="when">${timeAgo(i.createdAt)}</span></div>
+          <div class="ftitle">${esc(i.title)}</div>
+          <div class="frow">
+            ${i.url ? `<a href="${i.url}" target="_blank" rel="noopener">open ↗</a>` : ""}
+            ${i.lane >= 3 && i.status === "open" ? `<a href="#/queue/item/${i.id}">in queue →</a>` : ""}
+          </div>`;
+        const row = el2.querySelector(".frow");
+        const b = mkBtn("▶ agent", "ghost", async (e) => {
+          e.stopPropagation();
+          if (!state.yolo) { toast("Flip yolo on first — then agents may work", "err"); return; }
+          b.disabled = true;
+          try {
+            await api("/api/work", { itemId: i.id });
+            toast("Agent started — it will brief you before touching anything");
+            scheduleTick(true);
+          } catch (err) { toast(err.message, "err"); b.disabled = false; }
+        });
+        row.append(b);
+      },
+    });
+  };
+  paint("#feed-linear", f.linear, "Nothing ingested yet — run triage.");
+  paint("#feed-slack", f.slack, f.slackConnected
+    ? "No channel messages since the last sweep."
+    : `Connect Slack and <b>/invite @standin</b> to your channels — their activity lands here. <a href="#/connections">connections →</a>`);
+  paint("#feed-github", f.github, "No open PRs involving you right now.");
 }
 
 let homeSeq = 0;

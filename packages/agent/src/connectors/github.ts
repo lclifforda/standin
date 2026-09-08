@@ -5,32 +5,44 @@ import type { RawItem } from "@standin/core";
 
 const run = promisify(execFile);
 
-/** PRs waiting on the owner: review requested of them, open. */
-export async function ingestGithub(): Promise<RawItem[]> {
+interface SearchPr {
+  number: number;
+  title: string;
+  url: string;
+  repository: { nameWithOwner: string };
+  author: { login: string };
+  updatedAt: string;
+}
+
+async function searchPrs(filter: string, kind: string): Promise<RawItem[]> {
   const { stdout } = await run("gh", [
     "search", "prs",
-    "--review-requested=@me", "--state=open",
+    filter, "--state=open",
     "--json", "number,title,url,repository,author,updatedAt",
-    "--limit", "30",
+    "--limit", "20",
   ]);
-  const prs = JSON.parse(stdout) as {
-    number: number;
-    title: string;
-    url: string;
-    repository: { nameWithOwner: string };
-    author: { login: string };
-    updatedAt: string;
-  }[];
-  return prs.map((p) => ({
+  return (JSON.parse(stdout) as SearchPr[]).map((p) => ({
     source: "github" as const,
     externalId: p.url,
     title: `${p.repository.nameWithOwner}#${p.number}: ${p.title}`,
     url: p.url,
     actor: p.author.login,
-    kind: "review-requested",
+    kind,
     body: null,
     createdAt: p.updatedAt,
   }));
+}
+
+/** PRs waiting on the owner's review + the owner's own open PRs. */
+export async function ingestGithub(): Promise<RawItem[]> {
+  const [requested, mine] = await Promise.all([
+    searchPrs("--review-requested=@me", "review-requested"),
+    searchPrs("--author=@me", "your-open-pr"),
+  ]);
+  const seen = new Set<string>();
+  return [...requested, ...mine].filter((p) =>
+    seen.has(p.externalId) ? false : (seen.add(p.externalId), true),
+  );
 }
 
 export async function commentOnPr(prUrl: string, body: string): Promise<string> {
