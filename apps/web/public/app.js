@@ -63,7 +63,7 @@ function md(text) {
 /* ============ state ============ */
 const state = {
   route: { view: "queue", id: null },
-  queue: { items: [], quiet: 0, noise: [] },
+  queue: { tasks: [], quiet: 0, noise: [] },
   runs: [],
   connections: [],
   audit: [],
@@ -108,7 +108,7 @@ let ticking = false;
 function isLive() {
   if (state.runs.some((r) => r.status === "running" || r.status === "waiting")) return true;
   if ([...state.ui.overlay.values()].some((o) => o.length)) return true;
-  return state.queue.items.some((i) => i.chat?.some((m) => m.status === "pending"));
+  return state.queue.tasks.some((t) => t.chat?.some((m) => m.status === "pending"));
 }
 
 async function tick() {
@@ -188,7 +188,7 @@ function renderTopbar() {
   $("#brain").textContent = state.brain || "…";
   for (const a of document.querySelectorAll("#tabs a"))
     a.classList.toggle("active", a.dataset.view === state.route.view);
-  const urgent = state.queue.items.filter((i) => i.lane === 4).length;
+  const urgent = state.queue.tasks.filter((t) => t.lane === 4).length;
   const bq = $("#badge-queue");
   bq.hidden = urgent === 0;
   bq.textContent = urgent;
@@ -210,15 +210,15 @@ function renderConnDots() {
 }
 
 /* ============ view: queue — list ============ */
-function linkedRun(itemId) {
-  return state.runs.find((r) => r.itemId === itemId) ?? null;
+function linkedRun(task) {
+  return state.runs.find((r) => task.itemIds.includes(r.itemId)) ?? null;
 }
 const RUNLABEL = { running: "agent working…", waiting: "agent needs you", done: "agent done", failed: "agent failed" };
 
 function renderQueueList() {
-  const items = state.queue.items.map((it, ix) => ({ it, rank: ix + 1 }));
-  const l4 = state.queue.items.filter((i) => i.lane === 4).length;
-  const l3 = state.queue.items.length - l4;
+  const items = state.queue.tasks.map((it, ix) => ({ it, rank: ix + 1 }));
+  const l4 = state.queue.tasks.filter((t) => t.lane === 4).length;
+  const l3 = state.queue.tasks.length - l4;
   const parts = [];
   if (l4) parts.push(`<b>${l4} urgent</b>`);
   if (l3) parts.push(`<b>${l3}</b> need${l3 === 1 ? "s" : ""} a decision`);
@@ -249,9 +249,9 @@ function renderQueueList() {
     key: (w) => "i" + w.it.id,
     sig: (w) => {
       const last = w.it.chat?.at(-1);
-      const run = linkedRun(w.it.id);
-      return [w.rank, w.it.lane, w.it.chat?.length ?? 0, last?.status ?? "", !!w.it.draft,
-        run?.status ?? "", state.route.id === w.it.id, timeAgo(w.it.createdAt)].join("|");
+      const run = linkedRun(w.it);
+      return [w.rank, w.it.lane, w.it.count, w.it.chat?.length ?? 0, last?.status ?? "",
+        !!w.it.draft, run?.status ?? "", state.route.id === w.it.id, timeAgo(w.it.createdAt)].join("|");
     },
     create: (w) => {
       const el = document.createElement("div");
@@ -267,9 +267,10 @@ function renderQueueList() {
       el.className = "row lane" + it.lane;
       if (state.route.id === it.id) el.setAttribute("aria-current", "true");
       else el.removeAttribute("aria-current");
-      const run = linkedRun(it.id);
+      const run = linkedRun(it);
       const last = it.chat?.at(-1);
       const badges = [];
+      if (it.count > 1) badges.push(`<span class="tag">${it.count} updates</span>`);
       if (it.draft) badges.push(`<span class="tag acc">draft ready</span>`);
       if (it.chat?.length) badges.push(`<span class="tag${last?.status === "pending" ? " pulse" : ""}">💬 ${it.chat.length}</span>`);
       if (run) badges.push(`<span class="tag ${run.status === "waiting" ? "sig pulse" : run.status === "running" ? "acc pulse" : ""}">${RUNLABEL[run.status]}</span>`);
@@ -285,17 +286,17 @@ function renderQueueList() {
 /* ============ view: queue — detail ============ */
 let qd = { key: null }; // refs for the built detail skeleton
 
-function displayChat(item) {
-  const overlay = state.ui.overlay.get(item.id) ?? [];
+function displayChat(task) {
+  const overlay = state.ui.overlay.get(task.key) ?? [];
   if (overlay.length) {
     const owner = overlay.find((m) => m.role === "owner");
-    const lastOwner = [...(item.chat ?? [])].reverse().find((m) => m.role === "owner");
+    const lastOwner = [...(task.chat ?? [])].reverse().find((m) => m.role === "owner");
     if (owner && lastOwner && lastOwner.content === owner.content) {
-      state.ui.overlay.delete(item.id); // server caught up
-      return item.chat ?? [];
+      state.ui.overlay.delete(task.key); // server caught up
+      return task.chat ?? [];
     }
   }
-  return [...(item.chat ?? []), ...overlay];
+  return [...(task.chat ?? []), ...overlay];
 }
 
 function renderQueueDetail() {
@@ -311,14 +312,14 @@ function renderQueueDetail() {
     }
     return;
   }
-  const item = state.queue.items.find((i) => i.id === id);
-  if (!item) { renderTerminal(pane, id); return; }
-  if (qd.key !== "q" + id) buildQueueDetail(pane, item);
-  updateQueueDetail(item);
+  const task = state.queue.tasks.find((t) => t.id === id || t.itemIds.includes(id));
+  if (!task) { renderTerminal(pane, id); return; }
+  if (qd.key !== "q" + task.key) buildQueueDetail(pane, task);
+  updateQueueDetail(task);
 }
 
 function buildQueueDetail(pane, item) {
-  qd = { key: "q" + item.id };
+  qd = { key: "q" + item.key };
   pane.replaceChildren();
 
   const scroll = document.createElement("div");
@@ -351,12 +352,14 @@ function buildQueueDetail(pane, item) {
   dactions.append(
     qd.goBtn,
     mkBtn("Not now", "ghost", async () => {
-      await api(`/api/items/${item.id}/dismiss`, {});
+      // one task = every notification under it
+      await Promise.all(item.itemIds.map((i) => api(`/api/items/${i}/dismiss`, {})));
       location.hash = "#/queue";
       tick();
     }),
     mkBtn("This is noise", "ghost", async () => {
-      const r = await api(`/api/items/${item.id}/noise`, {});
+      const r = await api(`/api/items/${item.id}/noise`, {}); // one rule, not N
+      await Promise.all(item.itemIds.filter((i) => i !== item.id).map((i) => api(`/api/items/${i}/dismiss`, {})));
       toast("Hidden — the line moved: " + r.rule);
       location.hash = "#/queue";
       tick();
@@ -377,9 +380,26 @@ function buildQueueDetail(pane, item) {
   why.textContent = "why here: " + item.reason;
   scroll.append(summary, why);
 
+  // grouped updates (one task = all its notifications)
+  if (item.count > 1) {
+    const ev = document.createElement("div");
+    ev.className = "thread-label";
+    ev.textContent = `${item.count} updates on this task`;
+    const list = document.createElement("div");
+    list.className = "dwhy";
+    list.style.display = "flex";
+    list.style.flexDirection = "column";
+    list.style.gap = "5px";
+    list.innerHTML = item.events
+      .map((e) => `<span>· ${esc(e.actor ?? e.kind)} — ${esc(e.summary)} <i>(${timeAgo(e.createdAt)})</i></span>`)
+      .join("");
+    scroll.append(ev, list);
+  }
+
   // draft + approve
-  if (item.draft && item.action) {
-    state.ui.draftBase.set(item.id, item.draft);
+  const draftItemId = item.draftItemId;
+  if (item.draft && draftItemId) {
+    state.ui.draftBase.set(draftItemId, item.draft);
     const box = document.createElement("div");
     box.className = "draft";
     const label = document.createElement("div");
@@ -390,11 +410,11 @@ function buildQueueDetail(pane, item) {
     qd.draftNotice.textContent = "draft changed on server — reset to it";
     label.append(qd.draftNotice);
     const ta = document.createElement("textarea");
-    ta.value = state.ui.drafts.get(item.id) ?? item.draft;
-    ta.addEventListener("input", () => state.ui.drafts.set(item.id, ta.value));
+    ta.value = state.ui.drafts.get(draftItemId) ?? item.draft;
+    ta.addEventListener("input", () => state.ui.drafts.set(draftItemId, ta.value));
     qd.draftNotice.addEventListener("click", () => {
-      state.ui.drafts.delete(item.id);
-      ta.value = state.ui.draftBase.get(item.id) ?? "";
+      state.ui.drafts.delete(draftItemId);
+      ta.value = state.ui.draftBase.get(draftItemId) ?? "";
       qd.draftNotice.hidden = true;
     });
     qd.draftTa = ta;
@@ -407,10 +427,10 @@ function buildQueueDetail(pane, item) {
       qd.statusEl.className = "status";
       qd.statusEl.textContent = "sending…";
       try {
-        const r = await api(`/api/items/${item.id}/approve`, { draft: ta.value });
+        const r = await api(`/api/items/${draftItemId}/approve`, { draft: ta.value });
         qd.statusEl.textContent = "✓ " + r.note;
         toast("Sent — " + r.note);
-        state.ui.drafts.delete(item.id);
+        state.ui.drafts.delete(draftItemId);
         tick();
       } catch (e) {
         qd.statusEl.className = "status err";
@@ -444,30 +464,24 @@ function buildQueueDetail(pane, item) {
   const askBtn = mkBtn("Ask", "primary", null);
   askBtn.type = "submit";
   bar.append(qd.askInput, askBtn);
-  bar.addEventListener("submit", (e) => { e.preventDefault(); sendAsk(item.id); });
+  bar.addEventListener("submit", (e) => { e.preventDefault(); sendAsk(item); });
 
   pane.append(scroll, bar);
 }
 
-function sendAsk(itemId) {
+function sendAsk(task) {
   const q = qd.askInput.value.trim();
   if (!q) return;
   qd.askInput.value = "";
-  state.ui.overlay.set(itemId, [
+  state.ui.overlay.set(task.key, [
     { id: "tmp-o", role: "owner", content: q, status: "done" },
     { id: "tmp-p", role: "standin", content: "", status: "pending" },
   ]);
   render();
-  api(`/api/items/${itemId}/ask`, { question: q })
-    .then((r) => {
-      const item = state.queue.items.find((i) => i.id === itemId);
-      if (item) item.chat = r.chat;
-      state.ui.overlay.delete(itemId);
-      render();
-      scheduleTick(true);
-    })
+  api(`/api/items/${task.id}/ask`, { question: q })
+    .then(() => scheduleTick(true)) // the next tick's merged chat replaces the overlay
     .catch((e) => {
-      state.ui.overlay.set(itemId, [
+      state.ui.overlay.set(task.key, [
         { id: "tmp-o", role: "owner", content: q, status: "done" },
         { id: "tmp-p", role: "standin", content: e.message, status: "failed", retryQ: q },
       ]);
@@ -475,24 +489,26 @@ function sendAsk(itemId) {
     });
 }
 
-function bubbleNode(m, itemId) {
+function bubbleNode(m, task) {
   const el = document.createElement("div");
   el.setAttribute("data-bubble", "");
-  fillBubble(el, m, itemId);
+  fillBubble(el, m, task);
   return el;
 }
-function fillBubble(el, m, itemId) {
+function fillBubble(el, m, task) {
   el.className = `bubble ${m.role}` + (m.status === "pending" ? " pending" : m.status === "failed" ? " failed" : "");
   el.replaceChildren();
   if (m.status === "pending") el.textContent = "pulling the live ticket and thinking…";
   else if (m.status === "failed") {
     el.append(document.createTextNode("failed: " + m.content + " "));
-    const retry = mkBtn("Retry", "ghost", () => {
-      const prev = m.retryQ ?? [...(state.queue.items.find((i) => i.id === itemId)?.chat ?? [])].reverse().find((x) => x.role === "owner")?.content;
-      if (prev) { qd.askInput.value = prev; sendAsk(itemId); }
-    });
-    retry.style.padding = "2px 10px";
-    el.append(retry);
+    if (task) {
+      const retry = mkBtn("Retry", "ghost", () => {
+        const prev = m.retryQ ?? [...(task.chat ?? [])].reverse().find((x) => x.role === "owner")?.content;
+        if (prev) { qd.askInput.value = prev; sendAsk(task); }
+      });
+      retry.style.padding = "2px 10px";
+      el.append(retry);
+    }
   } else if (m.role === "standin") el.append(md(m.content));
   else el.textContent = m.content;
 }
@@ -502,19 +518,19 @@ function updateQueueDetail(item) {
   qd.goBtn.hidden = !state.yolo;
 
   // draft changed server-side while locally edited?
-  if (qd.draftTa) {
-    const base = state.ui.draftBase.get(item.id);
+  if (qd.draftTa && item.draftItemId) {
+    const base = state.ui.draftBase.get(item.draftItemId);
     if (item.draft !== base) {
-      if (state.ui.drafts.has(item.id)) qd.draftNotice.hidden = false;
-      else if (!qd.draftTa.contains(document.activeElement) && document.activeElement !== qd.draftTa) {
+      if (state.ui.drafts.has(item.draftItemId)) qd.draftNotice.hidden = false;
+      else if (document.activeElement !== qd.draftTa) {
         qd.draftTa.value = item.draft ?? "";
-        state.ui.draftBase.set(item.id, item.draft);
+        state.ui.draftBase.set(item.draftItemId, item.draft);
       }
     }
   }
 
   // linked runs strip (no inputs — safe to rebuild)
-  const runs = state.runs.filter((r) => r.itemId === item.id);
+  const runs = state.runs.filter((r) => item.itemIds.includes(r.itemId));
   qd.runstrip.replaceChildren(...runs.map((r) => {
     const a = document.createElement("a");
     a.href = `#/work/run/${r.id}`;
@@ -528,8 +544,8 @@ function updateQueueDetail(item) {
   syncList(qd.thread, chat, {
     key: (m) => "m" + m.id,
     sig: (m) => `${m.status}|${(m.content ?? "").length}`,
-    create: (m) => bubbleNode(m, item.id),
-    update: (el, m) => fillBubble(el, m, item.id),
+    create: (m) => bubbleNode(m, item),
+    update: (el, m) => fillBubble(el, m, item),
   });
   if (nearBottom) qd.scroll.scrollTop = qd.scroll.scrollHeight;
 }
@@ -564,7 +580,7 @@ async function renderTerminal(pane, id) {
     <div class="dsummary">${esc(cached.summary)}</div>`;
   const thread = document.createElement("div");
   thread.className = "thread";
-  for (const m of cached.chat ?? []) thread.append(bubbleNode(m, id));
+  for (const m of cached.chat ?? []) thread.append(bubbleNode(m, null));
   scroll.append(thread);
   pane.replaceChildren(scroll);
 }

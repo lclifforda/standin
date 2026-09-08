@@ -36,6 +36,7 @@ import {
 } from "@standin/core";
 import {
   askAboutItem,
+  issueIdentifier,
   buildExecutors,
   connectLinearOAuth,
   connectWithToken,
@@ -99,11 +100,52 @@ const server = createServer(async (req, res) => {
   try {
     if (req.method === "GET" && url.pathname === "/api/queue") {
       const counts = laneCounts(db);
+      // One TASK per underlying ticket: multiple notifications about the same
+      // issue group under one spine (the hook future Slack ingest joins too).
+      const items = listItems(db, { lanes: [3, 4] }).map((i) => ({
+        ...i,
+        chat: listChats(db, i.id),
+      }));
+      const groups = new Map<string, typeof items>();
+      for (const i of items) {
+        const key =
+          (i.source === "linear" ? issueIdentifier(i) : null) ?? `${i.source}:${i.externalId}`;
+        (groups.get(key) ?? groups.set(key, []).get(key)!).push(i);
+      }
+      const tasks = [...groups.entries()].map(([key, list]) => {
+        list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        const primary = list[0]!;
+        const withDraft = list.find((x) => x.draft && x.action);
+        return {
+          key,
+          id: primary.id, // chat + work runs anchor on the newest item
+          source: primary.source,
+          lane: Math.max(...list.map((l) => l.lane)),
+          title: primary.title,
+          summary: primary.summary,
+          reason: primary.reason,
+          url: primary.url,
+          actor: primary.actor,
+          createdAt: primary.createdAt,
+          count: list.length,
+          itemIds: list.map((l) => l.id),
+          events: list.map((l) => ({
+            id: l.id,
+            kind: l.kind,
+            actor: l.actor,
+            summary: l.summary,
+            createdAt: l.createdAt,
+          })),
+          draft: withDraft?.draft ?? null,
+          draftItemId: withDraft?.id ?? null,
+          chat: list
+            .flatMap((l) => l.chat)
+            .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+        };
+      });
+      tasks.sort((a, b) => b.lane - a.lane || b.createdAt.localeCompare(a.createdAt));
       json(res, 200, {
-        items: listItems(db, { lanes: [3, 4] }).map((i) => ({
-          ...i,
-          chat: listChats(db, i.id),
-        })),
+        tasks,
         quiet: counts[1] + counts[2],
         noise: listItems(db, { lanes: [1, 2] }).map((i) => ({
           id: i.id,
