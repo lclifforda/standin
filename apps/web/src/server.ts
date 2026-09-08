@@ -7,7 +7,7 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   actionBody,
@@ -51,12 +51,34 @@ let config = loadConfig(process.env.STANDIN_BRAIN);
 const db = openDb(config.dbPath);
 let executors = buildExecutors(config);
 
+const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "public");
+const MIME: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+};
+
+function serveStatic(res: ServerResponse, urlPath: string): void {
+  const rel = urlPath === "/" ? "index.html" : decodeURIComponent(urlPath.slice(1));
+  const abs = resolve(PUBLIC_DIR, rel);
+  if (!abs.startsWith(PUBLIC_DIR + sep)) return json(res, 404, { error: "not found" });
+  try {
+    const body = readFileSync(abs);
+    res.writeHead(200, {
+      "Content-Type": MIME[extname(abs)] ?? "application/octet-stream",
+      "Cache-Control": "no-cache",
+    });
+    res.end(body);
+  } catch {
+    json(res, 404, { error: "not found" });
+  }
+}
+
 /** Re-read secrets after the Connections UI changes them — no restart needed. */
 function refreshConfig(): void {
   config = loadConfig(process.env.STANDIN_BRAIN);
   executors = buildExecutors(config);
 }
-const htmlPath = join(dirname(fileURLToPath(import.meta.url)), "..", "public", "index.html");
 const PORT = Number(process.env.STANDIN_PORT ?? 4180);
 
 function json(res: ServerResponse, status: number, data: unknown): void {
@@ -75,10 +97,7 @@ const server = createServer(async (req, res) => {
   const itemAction = url.pathname.match(/^\/api\/items\/(\d+)\/(approve|dismiss|noise|ask)$/);
 
   try {
-    if (req.method === "GET" && url.pathname === "/") {
-      res.writeHead(200, { "Content-Type": "text/html" });
-      res.end(readFileSync(htmlPath, "utf8"));
-    } else if (req.method === "GET" && url.pathname === "/api/queue") {
+    if (req.method === "GET" && url.pathname === "/api/queue") {
       const counts = laneCounts(db);
       json(res, 200, {
         items: listItems(db, { lanes: [3, 4] }).map((i) => ({
@@ -94,6 +113,13 @@ const server = createServer(async (req, res) => {
       });
     } else if (req.method === "GET" && url.pathname.match(/^\/api\/items\/\d+\/chat$/)) {
       json(res, 200, { chat: listChats(db, Number(url.pathname.split("/")[3])) });
+    } else if (req.method === "GET" && url.pathname.match(/^\/api\/items\/\d+$/)) {
+      // Terminal-state lookup: a deep link to an approved/dismissed item still renders.
+      const id = Number(url.pathname.split("/")[3]);
+      const item = getItem(db, id);
+      item
+        ? json(res, 200, { item: { ...item, chat: listChats(db, id) } })
+        : json(res, 404, { error: `no item #${id}` });
     } else if (req.method === "GET" && url.pathname === "/api/audit") {
       json(res, 200, { events: listAudit(db) });
     } else if (req.method === "GET" && url.pathname === "/api/yolo") {
@@ -108,7 +134,8 @@ const server = createServer(async (req, res) => {
       audit(db, "yolo.toggled", body.on ? "yolo mode ON" : "yolo mode OFF");
       json(res, 200, { on: body.on === true });
     } else if (req.method === "GET" && url.pathname === "/api/runs") {
-      const runs = listRuns(db).map((r) => ({
+      const itemIdParam = url.searchParams.get("itemId");
+      const runs = listRuns(db, itemIdParam ? { itemId: Number(itemIdParam) } : {}).map((r) => ({
         ...r,
         question: r.status === "waiting" ? pendingQuestion(db, r.id) : null,
       }));
@@ -224,6 +251,8 @@ const server = createServer(async (req, res) => {
         audit(db, "line.moved", rule, { itemId: id });
         json(res, 200, { ok: true, rule });
       }
+    } else if (req.method === "GET" && !url.pathname.startsWith("/api/")) {
+      serveStatic(res, url.pathname);
     } else {
       json(res, 404, { error: "not found" });
     }

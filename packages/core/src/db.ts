@@ -432,10 +432,15 @@ export function getRun(db: DB, id: number): WorkRun | null {
   return r ? rowToRun(r) : null;
 }
 
-export function listRuns(db: DB, limit = 30): WorkRun[] {
-  const rows = db
-    .prepare("SELECT * FROM runs ORDER BY id DESC LIMIT ?")
-    .all(limit) as Record<string, unknown>[];
+export function listRuns(db: DB, opts: { itemId?: number; limit?: number } = {}): WorkRun[] {
+  const limit = opts.limit ?? 30;
+  const rows = (
+    opts.itemId !== undefined
+      ? db
+          .prepare("SELECT * FROM runs WHERE item_id = ? ORDER BY id DESC LIMIT ?")
+          .all(opts.itemId, limit)
+      : db.prepare("SELECT * FROM runs ORDER BY id DESC LIMIT ?").all(limit)
+  ) as Record<string, unknown>[];
   return rows.map(rowToRun);
 }
 
