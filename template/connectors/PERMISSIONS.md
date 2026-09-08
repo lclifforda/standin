@@ -30,11 +30,16 @@ tokens live in `mcp-remote`'s own cache (`~/.mcp-auth`), not standin's files.
 *API key*: acts as you with your full Linear permissions; stored only on your
 machine (`secrets.json`, owner-read-only), validated before saving.
 
-**Slack** — post-only by design: the app manifest requests exactly one scope,
-`chat:write`. It cannot read messages, channel lists, or profiles. It can only
-post in channels someone invited it to, and standin only sends what you
-approved, word for word. If the app-creation review screen ever shows more
-than `chat:write`, stop — that's not our manifest.
+**Slack** — invited-channels only, by design. The manifest requests:
+`chat:write` (post approved messages — word for word what you approved, only
+where invited), `channels:history` + `groups:history` (read ONLY channels the
+bot has been invited to — you control coverage channel by channel with
+`/invite @standin`), `channels:read`/`groups:read` (find its memberships), and
+`users:read`(+email) (turn user ids into names). **It has no DM scopes: it
+cannot read anyone's direct messages.** If the app-creation review screen
+shows scopes beyond these, stop — that's not our manifest. Reading your
+personal DMs would require user-level scopes — a separate, explicit decision
+we have deliberately not bundled in.
 
 ## Where secrets live
 
@@ -45,6 +50,6 @@ than `chat:write`, stop — that's not our manifest.
 
 ## What to tell an admin who must approve something
 
-"It's a personal assistant bot. Slack: chat:write only — it can post, never
-read, and only messages I explicitly approved. It runs on my machine, not a
-third-party server."
+"It's a personal assistant bot. Slack: it posts only messages I explicitly
+approved, and reads only channels I invite it to — it has no DM scopes at all.
+It runs on my machine, not a third-party server."

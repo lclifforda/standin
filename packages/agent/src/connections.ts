@@ -24,17 +24,36 @@ export interface ConnectionStatus {
   manifest?: string; // copy-paste app manifest (Slack) that pre-answers the permission screens
 }
 
-/** The Slack app, fully specified: one scope, post-only. Pasting this skips
- *  every permission screen — the review page shows exactly what it grants. */
+/** The Slack app, fully specified. Pasting this skips every permission screen —
+ *  the review page shows exactly what it grants:
+ *  - chat:write — post approved messages
+ *  - channels:history / groups:history — read ONLY channels it's invited to
+ *    (the owner controls coverage channel by channel, via /invite)
+ *  - channels:read / groups:read — list channels to find its memberships
+ *  - users:read (+email) — resolve user ids to names so triage reads humanly
+ *  No DM scopes: it cannot read anyone's direct messages. */
 export const SLACK_MANIFEST = JSON.stringify(
   {
     display_information: {
       name: "standin",
-      description: "Personal assistant bot. Posts only messages its owner explicitly approved.",
+      description:
+        "Personal assistant bot. Reads only channels it is invited to; posts only messages its owner explicitly approved.",
       background_color: "#0E7A5F",
     },
     features: { bot_user: { display_name: "standin", always_online: false } },
-    oauth_config: { scopes: { bot: ["chat:write"] } },
+    oauth_config: {
+      scopes: {
+        bot: [
+          "chat:write",
+          "channels:history",
+          "groups:history",
+          "channels:read",
+          "groups:read",
+          "users:read",
+          "users:read.email",
+        ],
+      },
+    },
     settings: { org_deploy_enabled: false, socket_mode_enabled: false, token_rotation_enabled: false },
   },
   null,
@@ -173,15 +192,16 @@ export async function listConnections(config: Config): Promise<ConnectionStatus[
           ? undefined
           : [
               "Open api.slack.com/apps → “Create New App” → choose “From a manifest” (NOT “From scratch” — the manifest below pre-answers every permission screen so you configure nothing by hand).",
-              "Pick your workspace → paste the manifest below (copy button) → Next. The review screen shows exactly what it grants: ONE bot scope, chat:write. If Slack's review shows anything more, stop and don't create it.",
-              "Click “Create”, then “Install to Workspace”. In an admin-restricted workspace this reads “Request to Install” — send it with: “personal assistant bot, chat:write only, posts only messages I explicitly approve.” Wait for the ok, then install.",
+              "Pick your workspace → paste the manifest below (copy button) → Next. The review screen shows exactly the scopes listed under “what connecting grants” here — post approved messages, read only invited channels, resolve names. If it shows anything beyond those, stop and don't create it.",
+              "Click “Create”, then “Install to Workspace”. In an admin-restricted workspace this reads “Request to Install” — send it with: “personal assistant bot: posts only messages I explicitly approve, and reads only channels I invite it to — no DMs.” Wait for the ok, then install.",
               "Open “OAuth & Permissions” in the left sidebar and copy the “Bot User OAuth Token” (starts with xoxb-) → paste it below. It's validated with Slack before anything is saved.",
               "In Slack, open the channel it should post in (your profile's Delivery channel) and type: /invite @standin — a bot can only post where it's been invited.",
             ],
       manifest: slackWho !== null ? undefined : SLACK_MANIFEST,
       permissions: [
-        "Post-only: chat:write lets the bot send messages — it CANNOT read any message, channel list, or profile.",
-        "It can only post in channels someone invited it to, and standin only sends what you approved, word for word.",
+        "Posts: chat:write — only what you approved, word for word, only where invited.",
+        "Reads: history of channels the bot has been INVITED to — you control coverage channel by channel with /invite. It CANNOT read direct messages (no DM scopes at all).",
+        "Names: users:read(+email) resolves ids to names so triage reads humanly.",
         "The token is stored on this machine only (secrets.json, owner-read-only).",
       ],
     },

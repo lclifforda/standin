@@ -109,13 +109,14 @@ const server = createServer(async (req, res) => {
       }));
       const groups = new Map<string, typeof items>();
       for (const i of items) {
-        // Group by ticket id from the URL (never the body — comment bodies
-        // mention OTHER tickets); fall back to the exact issue title, which
-        // Linear repeats verbatim across notifications for the same issue.
+        // Linear: ticket id from the URL (never the body — comment bodies
+        // mention OTHER tickets), exact-title fallback. Slack/GitHub: a ticket
+        // id in their text pulls them INTO that ticket's task — the
+        // cross-source dot-connecting.
         const ident =
           i.source === "linear"
             ? issueIdentifier({ title: i.title, body: null, url: i.url })
-            : null;
+            : issueIdentifier({ title: i.title, body: i.body, url: null });
         const key =
           ident ?? (i.source === "linear" ? `linear-title:${i.title}` : `${i.source}:${i.externalId}`);
         (groups.get(key) ?? groups.set(key, []).get(key)!).push(i);
@@ -123,16 +124,18 @@ const server = createServer(async (req, res) => {
       const tasks = [...groups.entries()].map(([key, list]) => {
         list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
         const primary = list[0]!;
+        // The Linear item is the task's face (title/link); freshness from newest.
+        const face = list.find((l) => l.source === "linear") ?? primary;
         const withDraft = list.find((x) => x.draft && x.action);
         return {
           key,
           id: primary.id, // chat + work runs anchor on the newest item
-          source: primary.source,
+          source: face.source,
           lane: Math.max(...list.map((l) => l.lane)),
-          title: primary.title,
+          title: face.title,
           summary: primary.summary,
           reason: primary.reason,
-          url: primary.url,
+          url: face.url,
           actor: primary.actor,
           createdAt: primary.createdAt,
           count: list.length,
