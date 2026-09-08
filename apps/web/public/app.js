@@ -157,7 +157,7 @@ function typeGreeting() {
   if (greetingTyped || !state.owner) return;
   greetingTyped = true;
   const el = $("#greeting");
-  const text = `Hello — I'm the working copy of ${state.owner}. How can I help?`;
+  const text = `Hello — I'm ${state.owner}'s replica. How can I help?`;
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (reduce) { el.textContent = text; return; }
   el.innerHTML = `<span class="caret"></span>`;
@@ -247,10 +247,12 @@ function startOrb() {
     ctx.beginPath();
     ctx.arc(S / 2, S / 2, S / 2 - 4, 0, 7);
     ctx.clip();
+    // liquid mercury: chrome grays, hard specular, cold rim
     const base = ctx.createRadialGradient(S * 0.38, S * 0.34, 12, S / 2, S / 2, S * 0.56);
-    base.addColorStop(0, "#b7f2dc");
-    base.addColorStop(0.45, "#27a17e");
-    base.addColorStop(1, "#07271e");
+    base.addColorStop(0, "#F4F4F6");
+    base.addColorStop(0.42, "#8E8E98");
+    base.addColorStop(0.78, "#3A3A42");
+    base.addColorStop(1, "#0A0A0D");
     ctx.fillStyle = base;
     ctx.fillRect(0, 0, S, S);
     ctx.globalCompositeOperation = "lighter";
@@ -258,8 +260,8 @@ function startOrb() {
       const x = S / 2 + Math.cos(t * b.sp * 3 + b.a) * b.r * (0.82 + 0.18 * Math.sin(t * 1.7 + b.a));
       const y = S / 2 + Math.sin(t * b.sp * 2.2 + b.a) * b.r * 0.85;
       const g = ctx.createRadialGradient(x, y, 0, x, y, b.size);
-      g.addColorStop(0, "rgba(190,255,230,0.42)");
-      g.addColorStop(0.55, "rgba(60,195,150,0.20)");
+      g.addColorStop(0, "rgba(255,255,255,0.36)");
+      g.addColorStop(0.55, "rgba(170,175,190,0.16)");
       g.addColorStop(1, "rgba(0,0,0,0)");
       ctx.fillStyle = g;
       ctx.beginPath();
@@ -267,14 +269,15 @@ function startOrb() {
       ctx.fill();
     }
     ctx.globalCompositeOperation = "source-over";
-    const spec = ctx.createRadialGradient(S * 0.35, S * 0.27, 2, S * 0.35, S * 0.27, 62);
-    spec.addColorStop(0, "rgba(255,255,255,0.5)");
+    const spec = ctx.createRadialGradient(S * 0.35, S * 0.27, 2, S * 0.35, S * 0.27, 58);
+    spec.addColorStop(0, "rgba(255,255,255,0.85)");
+    spec.addColorStop(0.4, "rgba(255,255,255,0.25)");
     spec.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = spec;
     ctx.fillRect(0, 0, S, S);
     const rim = ctx.createRadialGradient(S / 2, S / 2, S * 0.4, S / 2, S / 2, S * 0.5);
     rim.addColorStop(0, "rgba(0,0,0,0)");
-    rim.addColorStop(1, "rgba(140,240,200,0.25)");
+    rim.addColorStop(1, "rgba(220,225,235,0.28)");
     ctx.fillStyle = rim;
     ctx.fillRect(0, 0, S, S);
     ctx.restore();

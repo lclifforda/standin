@@ -1,18 +1,21 @@
+/* monochrome futurism: paper/ink in light, chrome-on-void in dark */
 :root{
-  --ground:#F4F6F3; --surface:#FFFFFF; --raise:#FBFCFA; --ink:#1B2320; --muted:#5C6A64;
-  --line:#DFE5E0; --line-soft:#EAEFEA; --accent:#0E7A5F; --accent-ink:#0A5C48;
-  --accent-soft:#E1EFE8; --signal:#BE4736; --signal-ink:#A03528; --signal-soft:#F9EAE6;
-  --mono-bg:#EEF2EE; --log-bg:#1B2320; --log-ink:#C9D4CD;
-  --shadow:0 1px 2px rgba(27,35,32,.05), 0 4px 16px rgba(27,35,32,.05);
+  --ground:#FAFAF9; --surface:#FFFFFF; --raise:#F4F4F3; --ink:#0F0F11; --muted:#6E6E74;
+  --line:#E1E1E3; --line-soft:#ECECEE; --accent:#141416; --accent-ink:#000000;
+  --accent-contrast:#FFFFFF;
+  --accent-soft:#EDEDEF; --signal:#D2402E; --signal-ink:#B03222; --signal-soft:#FAEAE7;
+  --mono-bg:#F0F0F1; --log-bg:#101012; --log-ink:#C2C2C8;
+  --shadow:0 1px 2px rgba(15,15,17,.05), 0 4px 16px rgba(15,15,17,.05);
   --topbar-h:53px;
 }
 @media (prefers-color-scheme: dark){
   :root{
-    --ground:#0F1412; --surface:#181F1C; --raise:#1D2521; --ink:#E7ECE8; --muted:#93A19A;
-    --line:#2A332E; --line-soft:#232B27; --accent:#43C299; --accent-ink:#71D9B6;
-    --accent-soft:#1B2C25; --signal:#E27562; --signal-ink:#ED9282; --signal-soft:#30201B;
-    --mono-bg:#202824; --log-bg:#0B0F0D; --log-ink:#9FB0A7;
-    --shadow:0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+    --ground:#09090B; --surface:#121214; --raise:#17171A; --ink:#ECECEE; --muted:#8B8B93;
+    --line:#27272C; --line-soft:#1D1D21; --accent:#E8E8EA; --accent-ink:#FFFFFF;
+    --accent-contrast:#0A0A0C;
+    --accent-soft:#1F1F24; --signal:#FF5D4A; --signal-ink:#FF8272; --signal-soft:#2A1411;
+    --mono-bg:#1A1A1E; --log-bg:#040405; --log-ink:#A9A9B2;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 4px 18px rgba(0,0,0,.35);
   }
 }
 *{box-sizing:border-box}
@@ -21,7 +24,7 @@ body{margin:0;background:var(--ground);color:var(--ink);font:400 15px/1.5 "Sourc
 button{font:600 13px "Source Sans 3",sans-serif;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:7px 14px;cursor:pointer;transition:border-color .12s, background .12s, opacity .12s}
 button:hover{border-color:var(--muted)}
 button:focus-visible,input:focus-visible,textarea:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-contrast)}
 button.primary:hover{filter:brightness(1.07)}
 button.ghost{background:transparent}
 button:disabled{opacity:.45;cursor:default;filter:none}
@@ -231,9 +234,6 @@ h2.viewtitle{font-family:"Schibsted Grotesk",sans-serif;font-weight:800;font-siz
 }
 
 /* ============ polish layer — presence, depth, motion ============ */
-@media (prefers-color-scheme: dark){
-  :root{ --ground:#0C110F; --surface:#151C19; --raise:#1A2320; }
-}
 body{
   background:
     radial-gradient(1100px 700px at 10% -12%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 62%),
@@ -250,8 +250,9 @@ body::after{ /* fine grain */
 
 button{transition:border-color .12s, background .12s, transform .12s, box-shadow .15s, opacity .12s}
 button.primary{
-  background:linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, #fff) 0%, var(--accent) 100%);
+  background:linear-gradient(180deg, color-mix(in srgb, var(--accent) 86%, var(--accent-contrast)) 0%, var(--accent) 100%);
   border-color:transparent;
+  color:var(--accent-contrast);
   box-shadow:0 1px 2px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.22);
 }
 button.primary:hover{transform:translateY(-1px);box-shadow:0 5px 16px color-mix(in srgb, var(--accent) 38%, transparent), inset 0 1px 0 rgba(255,255,255,.22);filter:none}
@@ -312,3 +313,8 @@ main>section:not([hidden]){animation:viewin .18s ease-out}
 .home-askbar{border-top:none;padding:6px 0 0;width:100%;background:transparent}
 .home-askbar input{background:var(--surface);border-color:var(--line);box-shadow:var(--shadow)}
 @media (max-width:860px){ #view-home.has-id .col.list{display:flex} }
+
+/* ============ replica tag ============ */
+#replica-tag{font:500 10px "IBM Plex Mono",monospace;letter-spacing:.34em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:9px;margin-top:-2px}
+#replica-tag .live{width:6px;height:6px;border-radius:50%;background:var(--accent-ink);animation:pulse 2s ease-in-out infinite;box-shadow:0 0 8px var(--accent)}
+@media (prefers-reduced-motion: reduce){#replica-tag .live{animation:none}}
