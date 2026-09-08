@@ -109,6 +109,34 @@ async function issueUuid(apiKey: string, identifier: string): Promise<string> {
   return data.issue.id;
 }
 
+/** Move an issue to a workflow state by (case-insensitive) name. */
+export async function setLinearStatus(
+  apiKey: string,
+  identifier: string,
+  statusName: string,
+): Promise<string> {
+  const data = await gql<{
+    issue: { id: string; team: { states: { nodes: { id: string; name: string }[] } } };
+  }>(
+    apiKey,
+    `query($id: String!) { issue(id: $id) { id team { states { nodes { id name } } } } }`,
+    { id: identifier },
+  );
+  const states = data.issue.team.states.nodes;
+  const target = states.find((s) => s.name.toLowerCase() === statusName.toLowerCase());
+  if (!target)
+    throw new Error(
+      `no state "${statusName}" on this team (has: ${states.map((s) => s.name).join(", ")})`,
+    );
+  const upd = await gql<{ issueUpdate: { success: boolean } }>(
+    apiKey,
+    `mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`,
+    { id: data.issue.id, input: { stateId: target.id } },
+  );
+  if (!upd.issueUpdate.success) throw new Error("Linear issueUpdate returned success=false");
+  return `moved ${identifier} to ${target.name}`;
+}
+
 export async function sendLinearComment(
   apiKey: string,
   issueId: string,

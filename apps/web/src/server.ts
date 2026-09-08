@@ -21,7 +21,10 @@ import {
   getRun,
   getSetting,
   insertChat,
+  insertHomeChat,
   listBySource,
+  listHomeChats,
+  resolveHomeChat,
   listChats,
   pendingQuestion,
   resolveChat,
@@ -108,7 +111,7 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
-  const itemAction = url.pathname.match(/^\/api\/items\/(\d+)\/(approve|dismiss|noise|ask)$/);
+  const itemAction = url.pathname.match(/^\/api\/items\/(\d+)\/(approve|dismiss|noise|ask|action)$/);
 
   try {
     if (req.method === "GET" && url.pathname === "/api/queue") {
@@ -200,6 +203,7 @@ const server = createServer(async (req, res) => {
         slack: listBySource(db, "slack").map(slim),
         github: listBySource(db, "github").map(slim),
         slackConnected: !!config.slackBotToken,
+        chat: listHomeChats(db),
       });
     } else if (req.method === "GET" && url.pathname === "/api/yolo") {
       json(res, 200, {
@@ -213,11 +217,19 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req);
       if (typeof body.question !== "string" || !body.question.trim())
         return json(res, 400, { error: "question required" });
-      const history = Array.isArray(body.history)
-        ? (body.history as { role: string; content: string }[])
-        : [];
-      const answer = await askGlobal(db, config, body.question.trim(), history);
-      json(res, 200, { answer });
+      const question = body.question.trim();
+      // Persistent, reload-safe — same pattern as per-task chats.
+      const history = listHomeChats(db)
+        .filter((m) => m.status === "done" && m.content)
+        .map((m) => ({ role: m.role, content: m.content }));
+      insertHomeChat(db, "owner", question);
+      const pendingId = insertHomeChat(db, "standin", "", "pending");
+      void askGlobal(db, config, question, history)
+        .then((answer) => resolveHomeChat(db, pendingId, answer, "done"))
+        .catch((err) =>
+          resolveHomeChat(db, pendingId, String(err instanceof Error ? err.message : err), "failed"),
+        );
+      json(res, 200, { chat: listHomeChats(db) });
     } else if (req.method === "POST" && url.pathname === "/api/autopilot") {
       const body = await readBody(req);
       setSetting(db, "autopilot", body.on ? "on" : "off");
@@ -343,6 +355,31 @@ const server = createServer(async (req, res) => {
             resolveChat(db, pendingId, String(err instanceof Error ? err.message : err), "failed"),
           );
         return json(res, 200, { ok: true, chat: listChats(db, id) });
+      }
+      if (verb === "action") {
+        // Quick actions: the click in the UI IS the explicit yes — the action
+        // is minted and executed through the contract like any other send.
+        const kind = body.kind;
+        const text = typeof body.body === "string" ? body.body.trim() : "";
+        const ident = issueIdentifier({ title: item.title, body: item.body, url: item.url });
+        let action;
+        if (kind === "github.close" && item.source === "github") {
+          action = { kind: "github.close" as const, prUrl: item.url ?? "" };
+        } else if (kind === "github.comment" && item.source === "github" && text) {
+          action = { kind: "github.comment" as const, prUrl: item.url ?? "", body: text };
+        } else if (kind === "linear.status" && item.source === "linear" && ident && text) {
+          action = { kind: "linear.status" as const, issueId: ident, status: text };
+        } else if (kind === "linear.comment" && item.source === "linear" && ident && text) {
+          action = { kind: "linear.comment" as const, issueId: ident, body: text };
+        } else if (kind === "slack.message" && item.source === "slack" && text) {
+          const channel = item.externalId.split(":")[0] ?? "";
+          action = { kind: "slack.message" as const, channel, text };
+        } else {
+          return json(res, 400, { error: `can't build ${String(kind)} from this item` });
+        }
+        const approval = mintApproval(db, id, action, `web-ui:quick-action`);
+        const note = await executeApproved(db, approval.id, executors);
+        return json(res, 200, { ok: true, note });
       }
       if (verb === "approve") {
         if (!item.action) return json(res, 400, { error: "item has no drafted action" });

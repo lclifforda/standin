@@ -54,3 +54,8 @@ export async function mergePr(prUrl: string): Promise<string> {
   await run("gh", ["pr", "merge", prUrl, "--squash"]);
   return `merged ${prUrl}`;
 }
+
+export async function closePr(prUrl: string): Promise<string> {
+  await run("gh", ["pr", "close", prUrl]);
+  return `closed ${prUrl}`;
+}

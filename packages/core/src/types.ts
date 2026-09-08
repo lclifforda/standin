@@ -10,8 +10,10 @@ export type ItemStatus = "open" | "done" | "dismissed" | "noise";
  */
 export type ActionSpec =
   | { kind: "linear.comment"; issueId: string; body: string }
+  | { kind: "linear.status"; issueId: string; status: string }
   | { kind: "slack.message"; channel: string; text: string }
   | { kind: "github.comment"; prUrl: string; body: string }
+  | { kind: "github.close"; prUrl: string }
   | { kind: "github.merge"; prUrl: string };
 
 /** What each action sends as human-editable text (shown/edited in the UI). */
@@ -19,10 +21,14 @@ export function actionBody(action: ActionSpec): string {
   switch (action.kind) {
     case "linear.comment":
       return action.body;
+    case "linear.status":
+      return `Move ${action.issueId} to "${action.status}"`;
     case "slack.message":
       return action.text;
     case "github.comment":
       return action.body;
+    case "github.close":
+      return `Close ${action.prUrl}`;
     case "github.merge":
       return `Merge ${action.prUrl}`;
   }
@@ -37,8 +43,10 @@ export function withBody(action: ActionSpec, body: string): ActionSpec {
       return { ...action, text: body };
     case "github.comment":
       return { ...action, body };
+    case "linear.status":
+    case "github.close":
     case "github.merge":
-      return action; // a merge has no editable text
+      return action; // no editable text
   }
 }
 

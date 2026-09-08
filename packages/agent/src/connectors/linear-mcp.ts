@@ -151,6 +151,22 @@ export async function getIssueContextOAuth(identifier: string): Promise<string> 
   }, 60_000);
 }
 
+/** Status change via MCP tool discovery (save_issue/update_issue take a state name). */
+export async function setLinearStatusOAuth(identifier: string, status: string): Promise<string> {
+  return withLinear(async (client) => {
+    const { tools } = await client.listTools();
+    const tool = tools.find((t) => /save_issue|update_issue/i.test(t.name));
+    if (!tool) throw new Error("Linear MCP exposes no issue-update tool");
+    const result = await client.callTool({
+      name: tool.name,
+      arguments: { id: identifier, state: status },
+    });
+    if ((result as { isError?: boolean }).isError)
+      throw new Error(`Linear MCP status change failed: ${textOf(result).slice(0, 200)}`);
+    return `moved ${identifier} to ${status} via Linear MCP`;
+  }, 60_000);
+}
+
 export async function sendLinearCommentOAuth(issueId: string, body: string): Promise<string> {
   return withLinear(async (client) => {
     const { tools } = await client.listTools();

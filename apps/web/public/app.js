@@ -71,7 +71,7 @@ const state = {
   brain: "",
   owner: "",
   autopilot: false,
-  homeChat: [], // ephemeral conversation with the copy (per page load)
+  feeds: null, // /api/feeds payload: source streams + the replica's persistent chat
   ui: {
     drafts: new Map(),     // itemId -> locally edited draft (authoritative once edited)
     draftBase: new Map(),  // itemId -> server draft at detail-build time
@@ -111,6 +111,7 @@ let ticking = false;
 function isLive() {
   if (state.runs.some((r) => r.status === "running" || r.status === "waiting")) return true;
   if ([...state.ui.overlay.values()].some((o) => o.length)) return true;
+  if (state.feeds?.chat?.some((m) => m.status === "pending")) return true;
   return state.queue.tasks.some((t) => t.chat?.some((m) => m.status === "pending"));
 }
 
@@ -259,8 +260,10 @@ function renderHome() {
   renderFeeds();
 
   const thread = $("#home-thread");
-  syncList(thread, state.homeChat, {
-    key: (m) => m.id,
+  const chat = state.feeds?.chat ?? [];
+  const near = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 60;
+  syncList(thread, chat, {
+    key: (m) => "hm" + m.id,
     sig: (m) => `${m.status}|${(m.content ?? "").length}`,
     create: () => document.createElement("div"),
     update: (el, m) => {
@@ -271,6 +274,55 @@ function renderHome() {
       else el.textContent = m.content;
     },
   });
+  if (near) thread.scrollTop = thread.scrollHeight;
+}
+
+/* two-step outward action: first click arms, second executes through the contract */
+function armBtn(label, fn) {
+  const b = mkBtn(label, "ghost", async () => {
+    if (b.dataset.armed !== "1") {
+      b.dataset.armed = "1";
+      b.textContent = "sure? " + label;
+      setTimeout(() => { b.dataset.armed = ""; b.textContent = label; }, 3000);
+      return;
+    }
+    b.disabled = true;
+    try { await fn(); } catch (e) { toast(e.message, "err"); }
+    b.disabled = false;
+    b.dataset.armed = "";
+    b.textContent = label;
+  });
+  return b;
+}
+
+function miniInput(row, placeholder, prefill, send) {
+  const b = mkBtn(placeholder.split(" ")[0] + "…", "ghost", () => {
+    if (row.querySelector("form")) { row.querySelector("form").remove(); return; }
+    const form = document.createElement("form");
+    form.className = "ask";
+    form.style.flexBasis = "100%";
+    const input = document.createElement("input");
+    input.placeholder = placeholder;
+    input.value = prefill;
+    const go = mkBtn("Send", "primary", null);
+    go.type = "submit";
+    form.append(input, go);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!input.value.trim()) return;
+      go.disabled = true;
+      try { await send(input.value.trim()); form.remove(); } catch (err) { toast(err.message, "err"); go.disabled = false; }
+    });
+    row.append(form);
+    input.focus();
+  });
+  return b;
+}
+
+async function quickAction(itemId, kind, body) {
+  const r = await api(`/api/items/${itemId}/action`, { kind, body });
+  toast("✓ " + r.note);
+  scheduleTick(true);
 }
 
 function renderFeeds() {
@@ -308,6 +360,30 @@ function renderFeeds() {
           } catch (err) { toast(err.message, "err"); b.disabled = false; }
         });
         row.append(b);
+        // source-native quick actions — each is an approval + ledger entry
+        if (elId === "#feed-linear") {
+          row.append(
+            armBtn("→ In Review", () => quickAction(i.id, "linear.status", "In Review")),
+            armBtn("→ Done", () => quickAction(i.id, "linear.status", "Done")),
+            miniInput(row, "comment on the ticket…", "", (t) => quickAction(i.id, "linear.comment", t)),
+          );
+        } else if (elId === "#feed-github") {
+          row.append(
+            miniInput(row, "comment on the PR…", "@aria please review this PR 🙏", (t) => quickAction(i.id, "github.comment", t)),
+            armBtn("close PR", () => quickAction(i.id, "github.close")),
+          );
+        } else if (elId === "#feed-slack") {
+          row.append(
+            miniInput(row, "reply in the channel…", "", (t) => quickAction(i.id, "slack.message", t)),
+          );
+        }
+        if (i.status === "open") {
+          row.append(armBtn("discard", async () => {
+            await api(`/api/items/${i.id}/dismiss`, {});
+            toast("Discarded");
+            scheduleTick(true);
+          }));
+        }
       },
     });
   };
@@ -318,27 +394,19 @@ function renderFeeds() {
   paint("#feed-github", f.github, "No open PRs involving you right now.");
 }
 
-let homeSeq = 0;
 $("#home-ask").addEventListener("submit", async (e) => {
   e.preventDefault();
   const input = $("#home-input");
   const question = input.value.trim();
   if (!question) return;
   input.value = "";
-  const history = state.homeChat.filter((m) => m.status === "done").map((m) => ({ role: m.role, content: m.content }));
-  state.homeChat.push({ id: "h" + ++homeSeq, role: "owner", content: question, status: "done" });
-  const pending = { id: "h" + ++homeSeq, role: "standin", content: "", status: "pending" };
-  state.homeChat.push(pending);
-  renderHome();
   try {
-    const r = await api("/api/ask", { question, history });
-    pending.content = r.answer;
-    pending.status = "done";
-  } catch (err) {
-    pending.content = err.message;
-    pending.status = "failed";
-  }
-  renderHome();
+    const r = await api("/api/ask", { question });
+    if (state.feeds) state.feeds.chat = r.chat;
+    else state.feeds = { chat: r.chat };
+    renderHome();
+    scheduleTick(true); // the pending answer resolves server-side; polling picks it up
+  } catch (err) { toast(err.message, "err"); }
 });
 
 /* ============ the orb ============ */

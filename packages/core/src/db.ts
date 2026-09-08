@@ -82,6 +82,13 @@ export function openDb(path: string): DB {
       status TEXT NOT NULL DEFAULT 'done',
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS home_chats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'done',
+      created_at TEXT NOT NULL
+    );
   `);
   return db;
 }
@@ -435,6 +442,45 @@ export function listChats(db: DB, itemId: number): ChatMessage[] {
     .prepare("SELECT * FROM chats WHERE item_id = ? ORDER BY id ASC")
     .all(itemId) as Record<string, unknown>[];
   return rows.map(rowToChat);
+}
+
+// --- home chat (the replica's persistent conversation with the owner) ---
+
+export interface HomeChatMessage {
+  id: number;
+  role: "owner" | "standin";
+  content: string;
+  status: "done" | "pending" | "failed";
+  createdAt: string;
+}
+
+export function insertHomeChat(
+  db: DB,
+  role: HomeChatMessage["role"],
+  content: string,
+  status: HomeChatMessage["status"] = "done",
+): number {
+  const res = db
+    .prepare("INSERT INTO home_chats (role, content, status, created_at) VALUES (?, ?, ?, ?)")
+    .run(role, content, status, new Date().toISOString());
+  return Number(res.lastInsertRowid);
+}
+
+export function resolveHomeChat(db: DB, id: number, content: string, status: "done" | "failed"): void {
+  db.prepare("UPDATE home_chats SET content = ?, status = ? WHERE id = ?").run(content, status, id);
+}
+
+export function listHomeChats(db: DB, limit = 60): HomeChatMessage[] {
+  const rows = db
+    .prepare("SELECT * FROM (SELECT * FROM home_chats ORDER BY id DESC LIMIT ?) ORDER BY id ASC")
+    .all(limit) as Record<string, unknown>[];
+  return rows.map((r) => ({
+    id: r.id as number,
+    role: r.role as HomeChatMessage["role"],
+    content: r.content as string,
+    status: r.status as HomeChatMessage["status"],
+    createdAt: r.created_at as string,
+  }));
 }
 
 export function pendingQuestion(db: DB, runId: number): OwnerQuestion | null {
