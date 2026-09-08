@@ -244,7 +244,7 @@ function renderQueueList() {
   if (items.length === 0) {
     list.replaceChildren(Object.assign(document.createElement("div"), {
       className: "empty",
-      innerHTML: "<b>Queue clear.</b><br>Run triage to read your inbox again.",
+      innerHTML: "<span class='mark'>🪞</span><b>Queue clear.</b><br>Run triage to read your inbox again.",
     }));
     return;
   }
@@ -310,7 +310,7 @@ function renderQueueDetail() {
     if (qd.key !== "ph") {
       pane.replaceChildren(Object.assign(document.createElement("div"), {
         className: "dplaceholder",
-        textContent: "Select an item — its context, conversation, and actions live here.",
+        innerHTML: "<span><span class='mark'>🪞</span>Select an item — its context, conversation, and actions live here.</span>",
       }));
       qd = { key: "ph" };
     }
@@ -598,7 +598,7 @@ function renderWorkList() {
   if (state.runs.length === 0) {
     list.replaceChildren(Object.assign(document.createElement("div"), {
       className: "empty",
-      innerHTML: "No agents have run yet.<br>Give one a task above, or <b>Go do it</b> on a queue item.",
+      innerHTML: "<span class='mark'>🪞</span>No agents have run yet.<br>Give one a task above, or <b>Go do it</b> on a queue item.",
     }));
     return;
   }
@@ -634,7 +634,7 @@ function renderWorkDetail() {
     if (wd.key !== "ph") {
       pane.replaceChildren(Object.assign(document.createElement("div"), {
         className: "dplaceholder",
-        textContent: "Select a run — its brief, questions, log, and report live here.",
+        innerHTML: "<span><span class='mark'>🪞</span>Select a run — its brief, questions, log, and report live here.</span>",
       }));
       wd = { key: "ph" };
     }
