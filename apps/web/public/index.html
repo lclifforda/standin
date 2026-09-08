@@ -82,6 +82,12 @@ section{margin-top:46px}
 .conn ol li::marker{font:600 12px "IBM Plex Mono",monospace;color:var(--accent-ink)}
 .conn ol b,.conn ol code{color:var(--ink)}
 .conn code{background:var(--mono-bg);border-radius:4px;padding:1px 6px;font:400 11.5px "IBM Plex Mono",monospace}
+.grants{border-top:1px dashed var(--line);padding-top:9px;display:flex;flex-direction:column;gap:5px}
+.grants .glabel{font:500 10px "IBM Plex Mono",monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.grants ul{margin:0;padding-left:16px;font-size:12.5px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+.grants li::marker{color:var(--accent)}
+.manifest{position:relative;background:var(--log-bg);color:var(--log-ink);border-radius:8px;padding:10px 12px;font:400 11px/1.5 "IBM Plex Mono",monospace;max-height:150px;overflow:auto;white-space:pre}
+.manifest button{position:sticky;top:0;float:right;padding:3px 10px;font-size:11px;background:var(--surface)}
 .conn form{display:flex;gap:8px;flex-wrap:wrap}
 .conn input{flex:1;min-width:170px;padding:8px 12px;font-family:"IBM Plex Mono",monospace;font-size:12.5px}
 .msg{font-size:12.5px;font-weight:600;color:var(--accent-ink)}
@@ -427,6 +433,25 @@ function connCard(c) {
       return li;
     }));
     el.append(ol);
+  }
+  if (c.manifest && !c.connected) {
+    const pre = document.createElement("div");
+    pre.className = "manifest";
+    const copy = mkBtn("Copy", "", async () => {
+      try { await navigator.clipboard.writeText(c.manifest); toast("Manifest copied — paste it in Slack's “From a manifest” box"); }
+      catch { toast("Couldn't access the clipboard — select and copy it manually", "err"); }
+    });
+    pre.append(copy, document.createTextNode(c.manifest));
+    el.append(pre);
+  }
+  if (c.permissions?.length) {
+    const g = document.createElement("div");
+    g.className = "grants";
+    const ul = document.createElement("ul");
+    ul.replaceChildren(...c.permissions.map(p => { const li = document.createElement("li"); li.textContent = p; return li; }));
+    g.innerHTML = `<span class="glabel">what connecting grants</span>`;
+    g.append(ul);
+    el.append(g);
   }
   if (c.acceptsToken && !c.connected) {
     if (c.id === "linear") {

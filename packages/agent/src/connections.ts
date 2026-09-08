@@ -20,7 +20,26 @@ export interface ConnectionStatus {
   acceptsToken: boolean; // whether the UI shows a paste-token form
   tokenHelpUrl: string | null;
   steps?: string[]; // plain-language setup walkthrough, shown while disconnected
+  permissions: string[]; // what connecting grants — always shown, never sugarcoated
+  manifest?: string; // copy-paste app manifest (Slack) that pre-answers the permission screens
 }
+
+/** The Slack app, fully specified: one scope, post-only. Pasting this skips
+ *  every permission screen — the review page shows exactly what it grants. */
+export const SLACK_MANIFEST = JSON.stringify(
+  {
+    display_information: {
+      name: "standin",
+      description: "Personal assistant bot. Posts only messages its owner explicitly approved.",
+      background_color: "#0E7A5F",
+    },
+    features: { bot_user: { display_name: "standin", always_online: false } },
+    oauth_config: { scopes: { bot: ["chat:write"] } },
+    settings: { org_deploy_enabled: false, socket_mode_enabled: false, token_rotation_enabled: false },
+  },
+  null,
+  2,
+);
 
 export async function validateLinearKey(apiKey: string): Promise<string> {
   const res = await fetch("https://api.linear.app/graphql", {
@@ -90,6 +109,10 @@ export async function listConnections(config: Config): Promise<ConnectionStatus[
         : "install Claude Code: npm install -g @anthropic-ai/claude-code — first run walks you through login",
       acceptsToken: false,
       tokenHelpUrl: null,
+      permissions: [
+        "Runs on YOUR Claude account (subscription or API key) — usage bills to you.",
+        "Sees what standin sends it: your inbox items, your profile, and repo code during work runs.",
+      ],
     },
     {
       id: "github",
@@ -108,6 +131,11 @@ export async function listConnections(config: Config): Promise<ConnectionStatus[
             "In a terminal run: gh auth login → pick GitHub.com → HTTPS → “Login with a web browser”, and follow the code it shows.",
             "Come back here — the dot turns green on the next refresh.",
           ],
+      permissions: [
+        "Your gh login acts as YOU with your full GitHub rights — this is the broadest grant here.",
+        "standin uses it to read PRs and, in yolo runs, to branch, commit, push, and open PRs.",
+        "Merging a PR or commenting happens ONLY through your explicit Approve — enforced in code, not by promise.",
+      ],
     },
     {
       id: "linear",
@@ -124,6 +152,10 @@ export async function listConnections(config: Config): Promise<ConnectionStatus[
               : "sign in with Linear (opens your browser — no key to paste); or paste an API key",
       acceptsToken: true,
       tokenHelpUrl: "https://linear.app/settings/account/security",
+      permissions: [
+        "Sign-in (OAuth): standin reads your issues, comments and notifications, and can create comments as you — creating is gated behind your Approve. Tokens live in mcp-remote's cache (~/.mcp-auth), not in standin's files.",
+        "API key alternative: a personal key carries your FULL Linear permissions; it's stored on this machine only (secrets.json, owner-read-only) and validated before saving.",
+      ],
     },
     {
       id: "slack",
@@ -140,12 +172,18 @@ export async function listConnections(config: Config): Promise<ConnectionStatus[
         slackWho !== null
           ? undefined
           : [
-              "Open api.slack.com/apps → “Create New App” → “From scratch”. Name it “standin”, pick your workspace.",
-              "In the left sidebar open “OAuth & Permissions”, scroll to Scopes, and under Bot Token Scopes add exactly one: chat:write. Nothing else — it can only post, never read.",
-              "At the top of that same page click “Install to Workspace”. If your workspace is admin-restricted you'll see “Request to Install” instead — send it with a note like: “personal assistant bot, chat:write only, posts only messages I explicitly approve.” Wait for the admin's ok, then install.",
-              "After installing, copy the “Bot User OAuth Token” (starts with xoxb-) from that page and paste it below — it's validated with Slack before anything is saved.",
-              "In Slack, go to the channel it should post in (your profile's Delivery channel) and type: /invite @standin — a bot can only post where it's been invited.",
+              "Open api.slack.com/apps → “Create New App” → choose “From a manifest” (NOT “From scratch” — the manifest below pre-answers every permission screen so you configure nothing by hand).",
+              "Pick your workspace → paste the manifest below (copy button) → Next. The review screen shows exactly what it grants: ONE bot scope, chat:write. If Slack's review shows anything more, stop and don't create it.",
+              "Click “Create”, then “Install to Workspace”. In an admin-restricted workspace this reads “Request to Install” — send it with: “personal assistant bot, chat:write only, posts only messages I explicitly approve.” Wait for the ok, then install.",
+              "Open “OAuth & Permissions” in the left sidebar and copy the “Bot User OAuth Token” (starts with xoxb-) → paste it below. It's validated with Slack before anything is saved.",
+              "In Slack, open the channel it should post in (your profile's Delivery channel) and type: /invite @standin — a bot can only post where it's been invited.",
             ],
+      manifest: slackWho !== null ? undefined : SLACK_MANIFEST,
+      permissions: [
+        "Post-only: chat:write lets the bot send messages — it CANNOT read any message, channel list, or profile.",
+        "It can only post in channels someone invited it to, and standin only sends what you approved, word for word.",
+        "The token is stored on this machine only (secrets.json, owner-read-only).",
+      ],
     },
   ];
 }
