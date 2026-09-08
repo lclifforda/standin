@@ -12,7 +12,7 @@
 </head>
 <body>
 <div id="topbar"><div class="in">
-  <a class="wordmark" href="#/queue">stand<span class="tld">in</span></a>
+  <a class="wordmark" href="#/home">stand<span class="tld">in</span></a>
   <span id="brain" title="the brain this session runs on">…</span>
   <nav id="tabs">
     <a href="#/queue" data-view="queue"><span class="tab-label">Queue</span><span class="badge signal" id="badge-queue" hidden></span></a>
@@ -30,6 +30,19 @@
 </div></div>
 
 <main>
+  <section id="view-home" hidden>
+    <div class="home-wrap">
+      <canvas id="orb" width="320" height="320" aria-hidden="true"></canvas>
+      <h1 id="greeting" aria-live="polite"></h1>
+      <p id="sitline"></p>
+      <div id="home-thread" class="thread"></div>
+      <form id="home-ask" class="askbar home-askbar">
+        <input id="home-input" placeholder="talk to your copy — “what's going on?”, “what should I do first?”…">
+        <button class="primary" type="submit">Ask</button>
+      </form>
+    </div>
+  </section>
+
   <section id="view-queue" hidden>
     <div class="col list">
       <div class="listhead">

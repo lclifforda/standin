@@ -10,4 +10,4 @@ export {
   type ConnectionStatus,
 } from "./connections.ts";
 export { startWorkRun, continueWorkRun } from "./work.ts";
-export { askAboutItem, issueIdentifier } from "./ask.ts";
+export { askAboutItem, askGlobal, issueIdentifier } from "./ask.ts";

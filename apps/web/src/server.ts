@@ -28,6 +28,7 @@ import {
   listAudit,
   listItems,
   listRuns,
+  loadBrain,
   mintApproval,
   openDb,
   setItemStatus,
@@ -37,6 +38,7 @@ import {
 } from "@standin/core";
 import {
   askAboutItem,
+  askGlobal,
   issueIdentifier,
   buildExecutors,
   connectLinearOAuth,
@@ -83,6 +85,14 @@ function refreshConfig(): void {
 }
 const PORT = Number(process.env.STANDIN_PORT ?? 4180);
 const BOOT = String(Date.now()); // clients reload themselves when this changes
+const OWNER = (() => {
+  try {
+    const n = loadBrain(config.brainDir).profileName.split(".")[0] ?? "you";
+    return n.charAt(0).toUpperCase() + n.slice(1);
+  } catch {
+    return "you";
+  }
+})();
 
 function json(res: ServerResponse, status: number, data: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -185,7 +195,17 @@ const server = createServer(async (req, res) => {
         autopilot: getSetting(db, "autopilot") === "on",
         workspaces: config.workspaces,
         brain: config.brainDir.split("/").at(-1),
+        owner: OWNER,
       });
+    } else if (req.method === "POST" && url.pathname === "/api/ask") {
+      const body = await readBody(req);
+      if (typeof body.question !== "string" || !body.question.trim())
+        return json(res, 400, { error: "question required" });
+      const history = Array.isArray(body.history)
+        ? (body.history as { role: string; content: string }[])
+        : [];
+      const answer = await askGlobal(db, config, body.question.trim(), history);
+      json(res, 200, { answer });
     } else if (req.method === "POST" && url.pathname === "/api/autopilot") {
       const body = await readBody(req);
       setSetting(db, "autopilot", body.on ? "on" : "off");

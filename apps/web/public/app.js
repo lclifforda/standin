@@ -69,6 +69,9 @@ const state = {
   audit: [],
   yolo: false,
   brain: "",
+  owner: "",
+  autopilot: false,
+  homeChat: [], // ephemeral conversation with the copy (per page load)
   ui: {
     drafts: new Map(),     // itemId -> locally edited draft (authoritative once edited)
     draftBase: new Map(),  // itemId -> server draft at detail-build time
@@ -143,7 +146,143 @@ async function loadYolo() {
   state.yolo = r.on;
   state.autopilot = r.autopilot === true;
   state.brain = r.brain || "";
+  state.owner = r.owner || "you";
+  typeGreeting();
   renderTopbar();
+}
+
+/* ============ home — the copy ============ */
+let greetingTyped = false;
+function typeGreeting() {
+  if (greetingTyped || !state.owner) return;
+  greetingTyped = true;
+  const el = $("#greeting");
+  const text = `Hello — I'm the working copy of ${state.owner}. How can I help?`;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce) { el.textContent = text; return; }
+  el.innerHTML = `<span class="caret"></span>`;
+  let i = 0;
+  const step = () => {
+    i++;
+    el.firstChild?.remove?.();
+    el.textContent = text.slice(0, i);
+    if (i < text.length) {
+      el.insertAdjacentHTML("beforeend", `<span class="caret"></span>`);
+      setTimeout(step, 26);
+    }
+  };
+  setTimeout(step, 400);
+}
+
+function renderHome() {
+  const t = state.queue.tasks;
+  const urgent = t.filter((x) => x.lane === 4).length;
+  const decisions = t.length - urgent;
+  const working = state.runs.filter((r) => r.status === "running").length;
+  const needsYou = state.runs.filter((r) => r.status === "waiting").length;
+  const bits = [];
+  if (urgent) bits.push(`<b>${urgent} urgent</b>`);
+  if (decisions) bits.push(`<b>${decisions}</b> need${decisions === 1 ? "s" : ""} your call`);
+  if (working) bits.push(`${working} agent${working === 1 ? "" : "s"} working`);
+  if (needsYou) bits.push(`<b>${needsYou} agent${needsYou === 1 ? "" : "s"} waiting on you</b>`);
+  if (!bits.length) bits.push("all quiet — nothing needs you");
+  $("#sitline").innerHTML =
+    `Right now: ${bits.join(" · ")}${state.queue.quiet ? ` · ${state.queue.quiet} handled quietly` : ""} — <a href="#/queue">open the queue</a>`;
+
+  const thread = $("#home-thread");
+  syncList(thread, state.homeChat, {
+    key: (m) => m.id,
+    sig: (m) => `${m.status}|${(m.content ?? "").length}`,
+    create: () => document.createElement("div"),
+    update: (el, m) => {
+      el.className = `bubble ${m.role}` + (m.status === "pending" ? " pending" : m.status === "failed" ? " failed" : "");
+      el.replaceChildren();
+      if (m.status === "pending") el.textContent = "reading the whole board…";
+      else if (m.role === "standin") el.append(md(m.content));
+      else el.textContent = m.content;
+    },
+  });
+}
+
+let homeSeq = 0;
+$("#home-ask").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = $("#home-input");
+  const question = input.value.trim();
+  if (!question) return;
+  input.value = "";
+  const history = state.homeChat.filter((m) => m.status === "done").map((m) => ({ role: m.role, content: m.content }));
+  state.homeChat.push({ id: "h" + ++homeSeq, role: "owner", content: question, status: "done" });
+  const pending = { id: "h" + ++homeSeq, role: "standin", content: "", status: "pending" };
+  state.homeChat.push(pending);
+  renderHome();
+  try {
+    const r = await api("/api/ask", { question, history });
+    pending.content = r.answer;
+    pending.status = "done";
+  } catch (err) {
+    pending.content = err.message;
+    pending.status = "failed";
+  }
+  renderHome();
+});
+
+/* ============ the orb ============ */
+function startOrb() {
+  const canvas = $("#orb");
+  const ctx = canvas.getContext("2d");
+  const S = 320;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const blobs = [...Array(6)].map((_, i) => ({
+    a: (i / 6) * Math.PI * 2,
+    r: 42 + (i % 3) * 22,
+    sp: (0.35 + (i % 4) * 0.14) * (i % 2 ? 1 : -1),
+    size: 66 + (i % 3) * 30,
+  }));
+  let t = 0;
+  function frame() {
+    t += 0.008;
+    ctx.clearRect(0, 0, S, S);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(S / 2, S / 2, S / 2 - 4, 0, 7);
+    ctx.clip();
+    const base = ctx.createRadialGradient(S * 0.38, S * 0.34, 12, S / 2, S / 2, S * 0.56);
+    base.addColorStop(0, "#b7f2dc");
+    base.addColorStop(0.45, "#27a17e");
+    base.addColorStop(1, "#07271e");
+    ctx.fillStyle = base;
+    ctx.fillRect(0, 0, S, S);
+    ctx.globalCompositeOperation = "lighter";
+    for (const b of blobs) {
+      const x = S / 2 + Math.cos(t * b.sp * 3 + b.a) * b.r * (0.82 + 0.18 * Math.sin(t * 1.7 + b.a));
+      const y = S / 2 + Math.sin(t * b.sp * 2.2 + b.a) * b.r * 0.85;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, b.size);
+      g.addColorStop(0, "rgba(190,255,230,0.42)");
+      g.addColorStop(0.55, "rgba(60,195,150,0.20)");
+      g.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, b.size, 0, 7);
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = "source-over";
+    const spec = ctx.createRadialGradient(S * 0.35, S * 0.27, 2, S * 0.35, S * 0.27, 62);
+    spec.addColorStop(0, "rgba(255,255,255,0.5)");
+    spec.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = spec;
+    ctx.fillRect(0, 0, S, S);
+    const rim = ctx.createRadialGradient(S / 2, S / 2, S * 0.4, S / 2, S / 2, S * 0.5);
+    rim.addColorStop(0, "rgba(0,0,0,0)");
+    rim.addColorStop(1, "rgba(140,240,200,0.25)");
+    ctx.fillStyle = rim;
+    ctx.fillRect(0, 0, S, S);
+    ctx.restore();
+    if (!reduce && !document.hidden) requestAnimationFrame(frame);
+  }
+  frame();
+  if (!reduce)
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) frame(); });
 }
 async function loadConnections() {
   state.connections = (await api("/api/connections")).connections;
@@ -153,6 +292,7 @@ async function loadConnections() {
 
 /* ============ router ============ */
 const ROUTES = [
+  [/^#\/home$/, () => ({ view: "home", id: null })],
   [/^#\/queue\/item\/(\d+)$/, (m) => ({ view: "queue", id: +m[1] })],
   [/^#\/queue$/, () => ({ view: "queue", id: null })],
   [/^#\/work\/run\/(\d+)$/, (m) => ({ view: "work", id: +m[1] })],
@@ -161,7 +301,7 @@ const ROUTES = [
   [/^#\/ledger$/, () => ({ view: "ledger", id: null })],
 ];
 function onHash() {
-  const hash = location.hash || "#/queue";
+  const hash = location.hash || "#/home";
   for (const [re, fn] of ROUTES) {
     const m = hash.match(re);
     if (m) {
@@ -172,19 +312,20 @@ function onHash() {
       return;
     }
   }
-  location.replace("#/queue");
+  location.replace("#/home");
 }
 window.addEventListener("hashchange", onHash);
 
 /* ============ render root + topbar ============ */
 function render() {
   renderTopbar();
-  for (const v of ["queue", "work", "connections", "ledger"]) {
+  for (const v of ["home", "queue", "work", "connections", "ledger"]) {
     const sec = $("#view-" + v);
     sec.hidden = state.route.view !== v;
     sec.classList.toggle("has-id", state.route.view === v && state.route.id != null);
   }
-  if (state.route.view === "queue") { renderQueueList(); renderQueueDetail(); }
+  if (state.route.view === "home") renderHome();
+  else if (state.route.view === "queue") { renderQueueList(); renderQueueDetail(); }
   else if (state.route.view === "work") { renderWorkList(); renderWorkDetail(); }
   else if (state.route.view === "ledger") renderLedger();
 }
@@ -1006,6 +1147,7 @@ $("#new-task").addEventListener("submit", async (e) => {
 });
 
 /* ============ init ============ */
+startOrb();
 loadYolo();
 loadConnections();
 onHash();
