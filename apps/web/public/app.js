@@ -111,13 +111,17 @@ function isLive() {
   return state.queue.tasks.some((t) => t.chat?.some((m) => m.status === "pending"));
 }
 
+let serverBoot = null;
 async function tick() {
   if (ticking) return;
   ticking = true;
   try {
     const [q, r] = await Promise.all([api("/api/queue"), api("/api/runs")]);
-    state.queue = q;
-    state.runs = r.runs;
+    // The server restarted (new code) while this tab was open — pick it up.
+    if (serverBoot && q.v !== serverBoot) { location.reload(); return; }
+    serverBoot = q.v ?? serverBoot;
+    state.queue = { tasks: q.tasks ?? [], quiet: q.quiet ?? 0, noise: q.noise ?? [] };
+    state.runs = r.runs ?? [];
     if (state.route.view === "ledger") state.audit = (await api("/api/audit")).events;
   } catch { /* server hiccup — keep last state */ }
   ticking = false;
@@ -756,46 +760,59 @@ function updateWorkDetail(run) {
 }
 
 /* ============ view: connections ============ */
+const BRAND = {
+  claude: { mark: "C", color: "#D97757", role: "the brain's runtime — your Claude account" },
+  github: { mark: "G", color: "#24292F", role: "repos, PRs, and yolo pushes — as you" },
+  linear: { mark: "L", color: "#5E6AD2", role: "your inbox in, approved comments out" },
+  slack: { mark: "S", color: "#4A154B", role: "approved announcements to your channel" },
+};
+
 function renderConnections() {
+  const on = state.connections.filter((c) => c.connected).length;
+  const total = state.connections.length || 4;
+  const prog = $("#conn-progress");
+  prog.innerHTML = `
+    <span class="ptext">${on === total
+      ? "<b>Fully powered.</b> Every connection is live."
+      : `<b>${on} of ${total} connected.</b> ${total - on} to go — each card walks you through it.`}</span>
+    <span class="pbar">${state.connections.map((c) => `<i class="${c.connected ? "on" : ""}"></i>`).join("")}</span>`;
   $("#conn-grid").replaceChildren(...state.connections.map(connCard));
 }
 
+function foldSection(label, node, open = false) {
+  const d = document.createElement("details");
+  if (open) d.open = true;
+  const s = document.createElement("summary");
+  s.textContent = label;
+  const body = document.createElement("div");
+  body.className = "body";
+  body.append(node);
+  d.append(s, body);
+  return d;
+}
+
 function connCard(c) {
+  const brand = BRAND[c.id] ?? { mark: "?", color: "#888", role: "" };
   const el = document.createElement("div");
   el.className = "conn";
-  const help = c.tokenHelpUrl ? ` <a href="${c.tokenHelpUrl}" target="_blank" rel="noopener">get a key →</a>` : "";
-  el.innerHTML = `
-    <div class="head">
+
+  // head: monogram · name/role · status pill
+  const head = document.createElement("div");
+  head.className = "head";
+  head.innerHTML = `
+    <span class="mono-mark" style="background:${brand.color}">${brand.mark}</span>
+    <span class="titlebox">
       <span class="name">${esc(c.name)}</span>
-      ${c.connected && c.who ? `<span class="who">✓ ${esc(c.who)}</span>` : ""}
-    </div>
-    <div class="detail">${esc(c.detail)}${c.connected ? "" : help}</div>`;
-  if (c.steps && !c.connected) {
-    const ol = document.createElement("ol");
-    ol.replaceChildren(...c.steps.map((s) => {
-      const li = document.createElement("li");
-      li.innerHTML = esc(s)
-        .replace(/(api\.slack\.com\/apps)/g, '<a href="https://$1" target="_blank" rel="noopener">$1</a>')
-        .replace(/(chat:write|xoxb-|\/invite @standin|gh auth login|brew install gh)/g, "<code>$1</code>")
-        .replace(/“([^”]+)”/g, "<b>“$1”</b>");
-      return li;
-    }));
-    el.append(ol);
-  }
-  if (c.manifest && !c.connected) {
-    const pre = document.createElement("div");
-    pre.className = "manifest";
-    const copy = mkBtn("Copy", "", async () => {
-      try { await navigator.clipboard.writeText(c.manifest); toast("Manifest copied — paste it in Slack's “From a manifest” box"); }
-      catch { toast("Couldn't access the clipboard — select and copy it manually", "err"); }
-    });
-    pre.append(copy, document.createTextNode(c.manifest));
-    el.append(pre);
-  }
-  if (c.acceptsToken && !c.connected) {
+      ${c.connected && c.who ? `<span class="who">${esc(c.who)}</span>` : `<span class="role">${esc(brand.role)}</span>`}
+    </span>
+    <span class="statuspill ${c.connected ? "on" : "off"}"><span class="dot"></span>${c.connected ? "Connected" : "Not connected"}</span>`;
+  el.append(head);
+
+  // primary CTA row (only while disconnected)
+  if (!c.connected) {
+    const cta = document.createElement("div");
+    cta.className = "cta";
     if (c.id === "linear") {
-      const row = document.createElement("div");
-      row.className = "actions";
       const msg = document.createElement("span");
       msg.className = "msg";
       const oauth = mkBtn("Sign in with Linear", "primary", async () => {
@@ -808,33 +825,79 @@ function connCard(c) {
           await loadConnections();
         } catch (err) { msg.className = "msg err"; msg.textContent = err.message; oauth.disabled = false; }
       });
-      row.append(oauth, msg);
-      el.append(row);
-      el.append(Object.assign(document.createElement("div"), { className: "detail", textContent: "or paste an API key:" }));
+      cta.append(oauth, msg);
+    } else if (!c.acceptsToken) {
+      cta.innerHTML = `<span class="msg" style="color:var(--muted)">${esc(c.detail)}</span>`;
     }
-    const form = document.createElement("form");
-    const input = document.createElement("input");
-    input.type = "password";
-    input.placeholder = c.id === "linear" ? "lin_api_…" : "xoxb-…";
-    input.autocomplete = "off";
-    const btn = mkBtn("Connect", "primary", null);
-    btn.type = "submit";
-    const msg = document.createElement("span");
-    msg.className = "msg";
-    form.append(input, btn, msg);
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      btn.disabled = true;
+    if (c.acceptsToken) {
+      const form = document.createElement("form");
+      const input = document.createElement("input");
+      input.type = "password";
+      input.placeholder = c.id === "linear" ? "or paste an API key: lin_api_…" : "paste your bot token: xoxb-…";
+      input.autocomplete = "off";
+      const btn = mkBtn("Connect", "primary", null);
+      btn.type = "submit";
+      const msg = document.createElement("span");
       msg.className = "msg";
-      msg.textContent = "checking with " + c.name + "…";
-      try {
-        const r = await api(`/api/connections/${c.id}`, { token: input.value });
-        toast(c.name + " connected as " + r.who);
-        await loadConnections();
-      } catch (err) { msg.className = "msg err"; msg.textContent = err.message + " — nothing saved"; btn.disabled = false; }
-    });
-    el.append(form);
-  } else if (c.acceptsToken && c.connected) {
+      form.append(input, btn, msg);
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        btn.disabled = true;
+        msg.className = "msg";
+        msg.textContent = "checking with " + c.name + "…";
+        try {
+          const r = await api(`/api/connections/${c.id}`, { token: input.value });
+          toast(c.name + " connected as " + r.who);
+          await loadConnections();
+        } catch (err) { msg.className = "msg err"; msg.textContent = err.message + " — nothing saved"; btn.disabled = false; }
+      });
+      cta.append(form);
+    }
+    el.append(cta);
+  }
+
+  // setup guide, folded (steps + manifest); open by default when it's the only path
+  if (!c.connected && (c.steps || c.manifest)) {
+    const wrap = document.createElement("div");
+    wrap.style.display = "flex";
+    wrap.style.flexDirection = "column";
+    wrap.style.gap = "10px";
+    if (c.steps) {
+      const ol = document.createElement("ol");
+      ol.replaceChildren(...c.steps.map((s) => {
+        const li = document.createElement("li");
+        li.innerHTML = esc(s)
+          .replace(/(api\.slack\.com\/apps)/g, '<a href="https://$1" target="_blank" rel="noopener">$1</a>')
+          .replace(/(chat:write|xoxb-|\/invite @standin|gh auth login|brew install gh)/g, "<code>$1</code>")
+          .replace(/“([^”]+)”/g, "<b>“$1”</b>");
+        return li;
+      }));
+      wrap.append(ol);
+    }
+    if (c.manifest) {
+      const pre = document.createElement("div");
+      pre.className = "manifest";
+      const copy = mkBtn("Copy", "", async () => {
+        try { await navigator.clipboard.writeText(c.manifest); toast("Manifest copied — paste it in Slack's “From a manifest” box"); }
+        catch { toast("Couldn't access the clipboard — select and copy it manually", "err"); }
+      });
+      pre.append(copy, document.createTextNode(c.manifest));
+      wrap.append(pre);
+    }
+    el.append(foldSection("Setup guide — step by step", wrap, c.id === "slack"));
+  }
+
+  // grants, folded — always available, never sugarcoated
+  if (c.permissions?.length) {
+    const g = document.createElement("div");
+    g.className = "grants";
+    const ul = document.createElement("ul");
+    ul.replaceChildren(...c.permissions.map((p) => Object.assign(document.createElement("li"), { textContent: p })));
+    g.append(ul);
+    el.append(foldSection("What connecting grants", g));
+  }
+
+  if (c.acceptsToken && c.connected) {
     const row = document.createElement("div");
     row.className = "actions";
     row.append(mkBtn("Disconnect", "ghost", async () => {
@@ -842,15 +905,6 @@ function connCard(c) {
       await loadConnections();
     }));
     el.append(row);
-  }
-  if (c.permissions?.length) {
-    const g = document.createElement("div");
-    g.className = "grants";
-    g.innerHTML = `<span class="glabel">what connecting grants</span>`;
-    const ul = document.createElement("ul");
-    ul.replaceChildren(...c.permissions.map((p) => Object.assign(document.createElement("li"), { textContent: p })));
-    g.append(ul);
-    el.append(g);
   }
   return el;
 }

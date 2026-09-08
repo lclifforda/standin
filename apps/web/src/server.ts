@@ -81,6 +81,7 @@ function refreshConfig(): void {
   executors = buildExecutors(config);
 }
 const PORT = Number(process.env.STANDIN_PORT ?? 4180);
+const BOOT = String(Date.now()); // clients reload themselves when this changes
 
 function json(res: ServerResponse, status: number, data: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -108,8 +109,15 @@ const server = createServer(async (req, res) => {
       }));
       const groups = new Map<string, typeof items>();
       for (const i of items) {
+        // Group by ticket id from the URL (never the body — comment bodies
+        // mention OTHER tickets); fall back to the exact issue title, which
+        // Linear repeats verbatim across notifications for the same issue.
+        const ident =
+          i.source === "linear"
+            ? issueIdentifier({ title: i.title, body: null, url: i.url })
+            : null;
         const key =
-          (i.source === "linear" ? issueIdentifier(i) : null) ?? `${i.source}:${i.externalId}`;
+          ident ?? (i.source === "linear" ? `linear-title:${i.title}` : `${i.source}:${i.externalId}`);
         (groups.get(key) ?? groups.set(key, []).get(key)!).push(i);
       }
       const tasks = [...groups.entries()].map(([key, list]) => {
@@ -145,6 +153,7 @@ const server = createServer(async (req, res) => {
       });
       tasks.sort((a, b) => b.lane - a.lane || b.createdAt.localeCompare(a.createdAt));
       json(res, 200, {
+        v: BOOT,
         tasks,
         quiet: counts[1] + counts[2],
         noise: listItems(db, { lanes: [1, 2] }).map((i) => ({
