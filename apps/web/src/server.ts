@@ -513,8 +513,15 @@ const server = createServer(async (req, res) => {
         setItemStatus(db, id, "done");
         json(res, 200, { ok: true, note });
       } else if (verb === "dismiss") {
-        setItemStatus(db, id, "dismissed");
-        audit(db, "item.dismissed", `#${id} dismissed from web UI`, { itemId: id });
+        // {as:"done"} = handled (outside standin or otherwise); default = not now
+        const asDone = body.as === "done";
+        setItemStatus(db, id, asDone ? "done" : "dismissed");
+        audit(
+          db,
+          asDone ? "item.done" : "item.dismissed",
+          asDone ? `#${id} marked done by owner` : `#${id} dismissed from web UI`,
+          { itemId: id },
+        );
         json(res, 200, { ok: true });
       } else {
         // "this is noise" — hide it AND teach the brain.

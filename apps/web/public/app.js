@@ -702,11 +702,21 @@ function buildQueueDetail(pane, item) {
     qd.goBtn.disabled = false;
   });
   qd.goBtn.title = "an agent gathers context, briefs you, and only works after your go";
+  const doneBtn = mkBtn("✓ Done", "", async () => {
+    // one task = every notification under it
+    await Promise.all(item.itemIds.map((i) => api(`/api/items/${i}/dismiss`, { as: "done" })));
+    toast("Task closed — it counts toward this week's shipped numbers");
+    location.hash = "#/queue";
+    tick();
+  });
+  doneBtn.style.borderColor = "var(--accent)";
+  doneBtn.title = "this task is handled (here or outside standin) — close it";
   dactions.append(
     qd.goBtn,
+    doneBtn,
     mkBtn("Not now", "ghost", async () => {
-      // one task = every notification under it
       await Promise.all(item.itemIds.map((i) => api(`/api/items/${i}/dismiss`, {})));
+      toast("Set aside");
       location.hash = "#/queue";
       tick();
     }),
@@ -963,7 +973,7 @@ async function renderTerminal(pane, id) {
   qd = { key: "t" + id };
   const scroll = document.createElement("div");
   scroll.className = "dscroll";
-  const NOTE = { done: "Handled — the approved action was sent.", dismissed: "Cleared — you set this aside.", noise: "Marked as noise — the triage line moved.", open: "This item is open but not in the current queue window." };
+  const NOTE = { done: "Handled — closed by you or an approved send.", dismissed: "Cleared — you set this aside.", noise: "Marked as noise — the triage line moved.", open: "This item is open but not in the current queue window." };
   scroll.innerHTML = `
     <div class="dhead">
       <div class="dmeta"><a class="backlink" href="#/queue">← queue</a><span>${esc(cached.source)}</span><span>${timeAgo(cached.createdAt)}</span></div>
