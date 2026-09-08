@@ -397,6 +397,44 @@ function renderFeeds() {
       },
     });
   };
+  // the owner's live plate: assigned, unfinished, newest touch first
+  const ap = $("#home-assigned");
+  const assigned = f.assigned ?? [];
+  if (f.assignedError) {
+    ap.replaceChildren(Object.assign(document.createElement("div"), {
+      className: "empty", innerHTML: "Couldn't fetch your assigned issues: " + esc(f.assignedError),
+    }));
+  } else if (assigned.length === 0) {
+    ap.replaceChildren(Object.assign(document.createElement("div"), {
+      className: "empty", innerHTML: "No unfinished issues assigned to you. Either bliss, or Linear isn't connected.",
+    }));
+  } else {
+    if (ap.firstElementChild?.className === "empty") ap.replaceChildren();
+    syncList(ap, assigned, {
+      key: (a) => "as" + a.identifier,
+      sig: (a) => `${a.state}|${timeAgo(a.updatedAt)}`,
+      create: () => document.createElement("div"),
+      update: (el, a) => {
+        el.className = "feed-row";
+        el.innerHTML = `
+          <div class="ftop"><span>${esc(a.identifier)}</span><span class="spill${/progress|review|started/i.test(a.state) ? " started" : ""}">${esc(a.state)}</span><span class="when">${timeAgo(a.updatedAt)}</span></div>
+          <div class="ftitle">${esc(a.title)}</div>
+          <div class="frow">${a.project ? `<span style="font-size:11px;color:var(--muted)">${esc(a.project)}</span>` : ""}<a href="${a.url}" target="_blank" rel="noopener">open ↗</a></div>`;
+        const row = el.querySelector(".frow");
+        const b = mkBtn("▶ agent", "ghost", async () => {
+          if (!state.yolo) { toast("Flip yolo on first — then agents may work", "err"); return; }
+          b.disabled = true;
+          try {
+            await api("/api/work", { instructions: `Work on ${a.identifier}: ${a.title} (${a.url})` });
+            toast("Agent started — it will brief you before touching anything");
+            scheduleTick(true);
+          } catch (err) { toast(err.message, "err"); b.disabled = false; }
+        });
+        row.append(b);
+      },
+    });
+  }
+
   paint("#feed-linear", f.linear, "Nothing ingested yet — run triage.");
   paint("#feed-slack", f.slack, f.slackConnected
     ? "No channel messages since the last sweep."

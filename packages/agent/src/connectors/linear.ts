@@ -109,6 +109,50 @@ async function issueUuid(apiKey: string, identifier: string): Promise<string> {
   return data.issue.id;
 }
 
+export interface AssignedIssue {
+  identifier: string;
+  title: string;
+  url: string;
+  state: string;
+  project: string | null;
+  updatedAt: string;
+}
+
+/** The owner's live plate: issues assigned to them that aren't finished. */
+export async function fetchAssignedIssues(apiKey: string): Promise<AssignedIssue[]> {
+  const data = await gql<{
+    issues: {
+      nodes: {
+        identifier: string;
+        title: string;
+        url: string;
+        updatedAt: string;
+        state: { name: string };
+        project: { name: string } | null;
+      }[];
+    };
+  }>(
+    apiKey,
+    `query {
+      issues(
+        filter: { assignee: { isMe: { eq: true } }, state: { type: { in: ["triage", "backlog", "unstarted", "started"] } } }
+        orderBy: updatedAt
+        first: 50
+      ) {
+        nodes { identifier title url updatedAt state { name } project { name } }
+      }
+    }`,
+  );
+  return data.issues.nodes.map((n) => ({
+    identifier: n.identifier,
+    title: n.title,
+    url: n.url,
+    state: n.state.name,
+    project: n.project?.name ?? null,
+    updatedAt: n.updatedAt,
+  }));
+}
+
 /** Move an issue to a workflow state by (case-insensitive) name. */
 export async function setLinearStatus(
   apiKey: string,

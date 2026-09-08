@@ -151,6 +151,38 @@ export async function getIssueContextOAuth(identifier: string): Promise<string> 
   }, 60_000);
 }
 
+/** Assigned-and-unfinished issues via MCP tool discovery. */
+export async function fetchAssignedOAuth(): Promise<
+  { identifier: string; title: string; url: string; state: string; project: string | null; updatedAt: string }[]
+> {
+  return withLinear(async (client) => {
+    const { tools } = await client.listTools();
+    const tool = tools.find((t) => /list_my_issues/i.test(t.name)) ?? tools.find((t) => /^list_issues$/i.test(t.name));
+    if (!tool) throw new Error("Linear MCP exposes no issues-list tool");
+    const args = /my_issues/i.test(tool.name) ? {} : { assignee: "me" };
+    const result = await client.callTool({ name: tool.name, arguments: args });
+    let parsed: unknown;
+    try { parsed = JSON.parse(textOf(result)); } catch { return []; }
+    const obj = parsed as Record<string, unknown>;
+    const list = (Array.isArray(parsed) ? parsed : obj.issues ?? obj.nodes ?? []) as Record<string, unknown>[];
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter((e) => {
+        const st = String((e.status as string) ?? (e.state as { name?: string })?.name ?? "");
+        return !/done|completed|canceled|cancelled|duplicate/i.test(st);
+      })
+      .map((e) => ({
+        identifier: String(e.identifier ?? e.id ?? ""),
+        title: String(e.title ?? ""),
+        url: String(e.url ?? ""),
+        state: String((e.status as string) ?? (e.state as { name?: string })?.name ?? "?"),
+        project: ((e.project as { name?: string })?.name ?? null) as string | null,
+        updatedAt: String(e.updatedAt ?? new Date().toISOString()),
+      }))
+      .filter((e) => e.identifier && e.title);
+  }, 60_000);
+}
+
 /** Status change via MCP tool discovery (save_issue/update_issue take a state name). */
 export async function setLinearStatusOAuth(identifier: string, status: string): Promise<string> {
   return withLinear(async (client) => {

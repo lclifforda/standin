@@ -341,3 +341,9 @@ main>section:not([hidden]){animation:viewin .18s ease-out}
 #weeks{border-collapse:collapse;width:100%;max-width:640px}
 #weeks td{border-bottom:1px solid var(--line-soft);padding:8px 14px 8px 0;font-size:13.5px;font-variant-numeric:tabular-nums}
 #weeks tr:first-child td{font:500 10px "IBM Plex Mono",monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+
+/* assigned plate */
+.assigned-panel{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.assigned-panel .feed-row{border-right:1px solid var(--line-soft)}
+.spill{font:500 10px "IBM Plex Mono",monospace;border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--muted)}
+.spill.started{border-color:var(--accent);color:var(--accent-ink)}

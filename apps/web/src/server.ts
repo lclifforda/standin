@@ -52,7 +52,10 @@ import {
 import {
   askAboutItem,
   askGlobal,
+  fetchAssignedIssues,
+  fetchAssignedOAuth,
   issueIdentifier,
+  type AssignedIssue,
   buildExecutors,
   connectLinearOAuth,
   connectWithToken,
@@ -76,6 +79,24 @@ for (const r of listRuns(db, { limit: 200 })) {
     finishRunAsInterrupted(r.id, r.sessionId);
   }
 }
+// the owner's assigned Linear issues — fetched live, cached briefly
+let assignedCache: { at: number; rows: AssignedIssue[]; error: string | null } = { at: 0, rows: [], error: null };
+async function assignedIssues(): Promise<{ rows: AssignedIssue[]; error: string | null }> {
+  if (Date.now() - assignedCache.at < 5 * 60 * 1000) return assignedCache;
+  try {
+    const rows = config.linearApiKey
+      ? await fetchAssignedIssues(config.linearApiKey)
+      : config.linearMcp
+        ? await fetchAssignedOAuth()
+        : [];
+    rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    assignedCache = { at: Date.now(), rows, error: null };
+  } catch (err) {
+    assignedCache = { at: Date.now(), rows: assignedCache.rows, error: String(err instanceof Error ? err.message : err) };
+  }
+  return assignedCache;
+}
+
 // 7-day retention: specifics roll into weekly shipped-numbers, then prune.
 const prunedAtBoot = pruneAndRollup(db);
 if (prunedAtBoot > 0) audit(db, "retention.rolled", `${prunedAtBoot} aged records rolled into weekly stats`);
@@ -256,6 +277,7 @@ const server = createServer(async (req, res) => {
     } else if (req.method === "GET" && url.pathname === "/api/audit") {
       json(res, 200, { events: listAudit(db) });
     } else if (req.method === "GET" && url.pathname === "/api/feeds") {
+      const assigned = await assignedIssues();
       const slim = (i: ReturnType<typeof listBySource>[number]) => ({
         id: i.id, title: i.title, actor: i.actor, url: i.url,
         kind: i.kind, lane: i.lane, status: i.status, createdAt: i.createdAt,
@@ -265,6 +287,8 @@ const server = createServer(async (req, res) => {
         slack: listBySource(db, "slack").map(slim),
         github: listBySource(db, "github").map(slim),
         slackConnected: !!config.slackBotToken,
+        assigned: assigned.rows.slice(0, 12),
+        assignedError: assigned.error,
         chat: listHomeChats(db),
         // what actually happened — executions and closures, from the ledger
         done: listAudit(db, 200)
