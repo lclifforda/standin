@@ -15,6 +15,7 @@ import {
   audit,
   executeApproved,
   answerQuestion,
+  executedKinds,
   getItem,
   getQuestion,
   getRun,
@@ -149,6 +150,8 @@ const server = createServer(async (req, res) => {
           })),
           draft: withDraft?.draft ?? null,
           draftItemId: withDraft?.id ?? null,
+          // loop closure, from spent approvals — a ✓ means actually sent
+          sent: executedKinds(db, list.map((l) => l.id)),
           chat: list
             .flatMap((l) => l.chat)
             .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
@@ -179,9 +182,15 @@ const server = createServer(async (req, res) => {
     } else if (req.method === "GET" && url.pathname === "/api/yolo") {
       json(res, 200, {
         on: getSetting(db, "yolo") === "on",
+        autopilot: getSetting(db, "autopilot") === "on",
         workspaces: config.workspaces,
         brain: config.brainDir.split("/").at(-1),
       });
+    } else if (req.method === "POST" && url.pathname === "/api/autopilot") {
+      const body = await readBody(req);
+      setSetting(db, "autopilot", body.on ? "on" : "off");
+      audit(db, "autopilot.toggled", body.on ? "auto-brief ON" : "auto-brief OFF");
+      json(res, 200, { on: body.on === true });
     } else if (req.method === "POST" && url.pathname === "/api/yolo") {
       const body = await readBody(req);
       setSetting(db, "yolo", body.on ? "on" : "off");
@@ -254,7 +263,32 @@ const server = createServer(async (req, res) => {
       json(res, 200, { ok: true });
     } else if (req.method === "POST" && url.pathname === "/api/triage") {
       const r = await runTriage(config);
-      json(res, 200, r);
+      // Autopilot: every surfaced task gets its agent automatically. Safe by
+      // design — the pipeline's ALIGN checkpoint stops each run at a brief
+      // until the owner says go. Requires yolo AND auto-brief, capped per run.
+      let briefed = 0;
+      if (getSetting(db, "yolo") === "on" && getSetting(db, "autopilot") === "on") {
+        // group open items the same way the queue does, so one TASK gets one agent
+        const open = listItems(db, { lanes: [3, 4] });
+        const byKey = new Map<string, typeof open>();
+        for (const i of open) {
+          const ident =
+            i.source === "linear"
+              ? issueIdentifier({ title: i.title, body: null, url: i.url })
+              : issueIdentifier({ title: i.title, body: i.body, url: null });
+          const key =
+            ident ?? (i.source === "linear" ? `linear-title:${i.title}` : `${i.source}:${i.externalId}`);
+          (byKey.get(key) ?? byKey.set(key, []).get(key)!).push(i);
+        }
+        for (const list of byKey.values()) {
+          if (briefed >= 3) break;
+          if (list.some((i) => listRuns(db, { itemId: i.id, limit: 1 }).length > 0)) continue;
+          list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+          startWorkRun(db, config, { itemId: list[0]!.id });
+          briefed++;
+        }
+      }
+      json(res, 200, { ...r, briefed });
     } else if (req.method === "POST" && itemAction) {
       const id = Number(itemAction[1]);
       const verb = itemAction[2];

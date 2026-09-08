@@ -220,6 +220,19 @@ export function markApprovalUsed(db: DB, id: string): void {
   db.prepare("UPDATE approvals SET used_at = ? WHERE id = ?").run(new Date().toISOString(), id);
 }
 
+/** Action kinds actually EXECUTED for these items (spent approvals — the
+ *  ledger's own evidence, not intentions). Feeds the task loop strip. */
+export function executedKinds(db: DB, itemIds: number[]): string[] {
+  if (itemIds.length === 0) return [];
+  const placeholders = itemIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT action_json FROM approvals WHERE used_at IS NOT NULL AND item_id IN (${placeholders})`,
+    )
+    .all(...itemIds) as { action_json: string }[];
+  return [...new Set(rows.map((r) => (JSON.parse(r.action_json) as { kind: string }).kind))];
+}
+
 // --- audit ---
 
 export function audit(

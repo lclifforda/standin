@@ -141,6 +141,7 @@ document.addEventListener("visibilitychange", () => {
 async function loadYolo() {
   const r = await api("/api/yolo");
   state.yolo = r.on;
+  state.autopilot = r.autopilot === true;
   state.brain = r.brain || "";
   renderTopbar();
 }
@@ -203,6 +204,10 @@ function renderTopbar() {
   const y = $("#yolo");
   y.classList.toggle("on", state.yolo);
   y.setAttribute("aria-checked", String(state.yolo));
+  const a = $("#autopilot");
+  a.classList.toggle("on", state.autopilot);
+  a.setAttribute("aria-checked", String(state.autopilot));
+  a.style.opacity = state.yolo ? "" : ".5";
 }
 function renderConnDots() {
   $("#conn-dots").replaceChildren(...state.connections.map((c) => {
@@ -255,7 +260,8 @@ function renderQueueList() {
       const last = w.it.chat?.at(-1);
       const run = linkedRun(w.it);
       return [w.rank, w.it.lane, w.it.count, w.it.chat?.length ?? 0, last?.status ?? "",
-        !!w.it.draft, run?.status ?? "", state.route.id === w.it.id, timeAgo(w.it.createdAt)].join("|");
+        !!w.it.draft, run?.status ?? "", (w.it.sent ?? []).join(","),
+        state.route.id === w.it.id, timeAgo(w.it.createdAt)].join("|");
     },
     create: (w) => {
       const el = document.createElement("div");
@@ -275,6 +281,10 @@ function renderQueueList() {
       const last = it.chat?.at(-1);
       const badges = [];
       if (it.count > 1) badges.push(`<span class="tag">${it.count} updates</span>`);
+      for (const k of it.sent ?? []) {
+        const label = k.startsWith("linear") ? "linear ✓" : k.startsWith("slack") ? "slack ✓" : "github ✓";
+        if (!badges.some((b) => b.includes(label))) badges.push(`<span class="tag acc">${label}</span>`);
+      }
       if (it.draft) badges.push(`<span class="tag acc">draft ready</span>`);
       if (it.chat?.length) badges.push(`<span class="tag${last?.status === "pending" ? " pulse" : ""}">💬 ${it.chat.length}</span>`);
       if (run) badges.push(`<span class="tag ${run.status === "waiting" ? "sig pulse" : run.status === "running" ? "acc pulse" : ""}">${RUNLABEL[run.status]}</span>`);
@@ -447,6 +457,11 @@ function buildQueueDetail(pane, item) {
     scroll.append(box);
   }
 
+  // loop closure strip — evidence from the approvals ledger, not intentions
+  qd.loop = document.createElement("div");
+  qd.loop.className = "runstrip";
+  scroll.append(qd.loop);
+
   // linked runs
   qd.runstrip = document.createElement("div");
   qd.runstrip.className = "runstrip";
@@ -532,6 +547,18 @@ function updateQueueDetail(item) {
       }
     }
   }
+
+  // loop closure chips
+  const sent = item.sent ?? [];
+  const run = linkedRun(item);
+  const loopChip = (label, done, active) =>
+    `<span class="tag ${done ? "acc" : active ? "acc pulse" : ""}">${label} ${done ? "✓" : active ? "…" : "—"}</span>`;
+  qd.loop.innerHTML =
+    `<span class="tag" style="border:none;padding-left:0">loop:</span>` +
+    loopChip("work", run?.status === "done", run?.status === "running" || run?.status === "waiting") +
+    loopChip("linear", sent.includes("linear.comment"), false) +
+    loopChip("slack", sent.includes("slack.message"), false) +
+    loopChip("github", sent.includes("github.comment") || sent.includes("github.merge"), false);
 
   // linked runs strip (no inputs — safe to rebuild)
   const runs = state.runs.filter((r) => item.itemIds.includes(r.itemId));
@@ -933,6 +960,17 @@ function renderLedger() {
 /* ============ global controls ============ */
 $("#yolo").addEventListener("click", toggleYolo);
 $("#yolo").addEventListener("keydown", (e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggleYolo(); } });
+async function toggleAutopilot() {
+  if (!state.yolo && !state.autopilot) { toast("Auto-brief needs yolo on — it starts agents", "err"); return; }
+  const { on } = await api("/api/autopilot", { on: !state.autopilot });
+  state.autopilot = on;
+  toast(on
+    ? "Auto-brief on — every new task gets an agent that briefs you; nothing executes before your go"
+    : "Auto-brief off — agents start only when you click Go do it");
+  renderTopbar();
+}
+$("#autopilot").addEventListener("click", toggleAutopilot);
+$("#autopilot").addEventListener("keydown", (e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggleAutopilot(); } });
 async function toggleYolo() {
   const { on } = await api("/api/yolo", { on: !state.yolo });
   state.yolo = on;
@@ -946,7 +984,7 @@ $("#triage-btn").addEventListener("click", async () => {
   b.textContent = "Reading your inbox…";
   try {
     const r = await api("/api/triage", {});
-    toast(`Triage done — ${r.new} new item${r.new === 1 ? "" : "s"}`);
+    toast(`Triage done — ${r.new} new item${r.new === 1 ? "" : "s"}${r.briefed ? ` · ${r.briefed} agent${r.briefed === 1 ? "" : "s"} briefing` : ""}`);
     await tick();
   } catch (e) { toast(e.message, "err"); }
   b.disabled = false;
