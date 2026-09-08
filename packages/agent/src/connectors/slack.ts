@@ -15,6 +15,14 @@ async function slack<T>(token: string, method: string, params: Record<string, st
   return json;
 }
 
+/** The scopes actually granted to this token (from Slack's response header). */
+export async function slackGrantedScopes(token: string): Promise<string[]> {
+  const res = await fetch("https://slack.com/api/auth.test", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return (res.headers.get("x-oauth-scopes") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+}
+
 export async function sendSlackMessage(
   token: string,
   channel: string,

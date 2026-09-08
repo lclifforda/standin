@@ -22,6 +22,7 @@ export interface TriageResult {
   ingested: number;
   new: number;
   counts: Record<Lane, number>;
+  warnings: string[]; // ingest problems belong on the owner's screen, not in a log
 }
 
 export async function runTriage(config: Config): Promise<TriageResult> {
@@ -29,19 +30,20 @@ export async function runTriage(config: Config): Promise<TriageResult> {
   const db = openDb(config.dbPath);
 
   const raw: RawItem[] = [];
+  const warnings: string[] = [];
   if (config.linearApiKey) {
     raw.push(...(await ingestLinear(config.linearApiKey)));
   } else if (config.linearMcp) {
     raw.push(...(await ingestLinearOAuth()));
   } else {
-    console.warn("Linear not connected — open the Connections panel in the web UI");
+    warnings.push("Linear not connected — nothing ingested from it");
   }
 
-  // GitHub: PRs waiting on the owner's review (via their gh login).
+  // GitHub: PRs waiting on the owner's review + their own open PRs.
   try {
     raw.push(...(await ingestGithub()));
   } catch (err) {
-    console.warn(`GitHub ingest skipped: ${String(err instanceof Error ? err.message : err)}`);
+    warnings.push(`GitHub ingest failed: ${String(err instanceof Error ? err.message : err)}`);
   }
 
   // Slack: channels the bot is invited to, since the last sweep (default 24h).
@@ -52,8 +54,16 @@ export async function runTriage(config: Config): Promise<TriageResult> {
       const msgs = await ingestSlack(config.slackBotToken, since);
       raw.push(...msgs);
       setSetting(db, "slackSince", String(Date.now() / 1000));
+      if (msgs.length === 0 && getSetting(db, "slackSweptOnce") !== "yes")
+        warnings.push("Slack swept 0 messages — has the bot been /invited to your channels?");
+      if (msgs.length > 0) setSetting(db, "slackSweptOnce", "yes");
     } catch (err) {
-      console.warn(`Slack ingest skipped: ${String(err instanceof Error ? err.message : err)}`);
+      const msg = String(err instanceof Error ? err.message : err);
+      warnings.push(
+        msg.includes("missing_scope")
+          ? "Slack read failed: the installed app is send-only (old manifest) — see the Slack card in Connections for the one-step fix"
+          : `Slack ingest failed: ${msg}`,
+      );
     }
   }
 
@@ -76,5 +86,5 @@ export async function runTriage(config: Config): Promise<TriageResult> {
     "triage.run",
     `ingested ${raw.length}, new ${fresh.length} (profile: ${brain.profileName})`,
   );
-  return { ingested: raw.length, new: fresh.length, counts: laneCounts(db) };
+  return { ingested: raw.length, new: fresh.length, counts: laneCounts(db), warnings };
 }

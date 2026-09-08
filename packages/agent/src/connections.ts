@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import type { Config } from "./config.ts";
 import { writeSecret, type SecretName } from "./secrets.ts";
 import { connectLinearOAuth as mcpConnect, linearOAuthStatus } from "./connectors/linear-mcp.ts";
+import { slackGrantedScopes } from "./connectors/slack.ts";
 
 const run = promisify(execFile);
 
@@ -113,8 +114,14 @@ export async function listConnections(config: Config): Promise<ConnectionStatus[
     linearWho = await linearOAuthStatus();
   }
   let slackWho: string | null = null;
+  let slackSendOnly = false;
   if (config.slackBotToken) {
     slackWho = await validateSlackToken(config.slackBotToken).catch(() => null);
+    if (slackWho) {
+      const scopes = await slackGrantedScopes(config.slackBotToken).catch((): string[] => []);
+      slackSendOnly = !scopes.includes("channels:history");
+      if (slackSendOnly) slackWho += " · SEND-ONLY";
+    }
   }
 
   return [
@@ -183,12 +190,14 @@ export async function listConnections(config: Config): Promise<ConnectionStatus[
       who: slackWho,
       detail:
         slackWho !== null
-          ? "approved messages send through your bot"
+          ? slackSendOnly
+            ? "the installed app has chat:write ONLY — it can post but not read your channels. Fix: open your app at api.slack.com/apps → “App Manifest” → paste the current manifest (setup guide below) → Save → reinstall (may need the admin's ok for the new read scopes) → done, same token gains the scopes."
+            : "approved messages send through your bot; channels it's invited to are read on every triage"
           : "optional — lets Approve & send post to Slack. One-time setup (~5 min, may need an admin's ok):",
       acceptsToken: true,
       tokenHelpUrl: "https://api.slack.com/apps",
       steps:
-        slackWho !== null
+        slackWho !== null && !slackSendOnly
           ? undefined
           : [
               "Open api.slack.com/apps → “Create New App” → choose “From a manifest” (NOT “From scratch” — the manifest below pre-answers every permission screen so you configure nothing by hand).",
@@ -197,7 +206,7 @@ export async function listConnections(config: Config): Promise<ConnectionStatus[
               "Open “OAuth & Permissions” in the left sidebar and copy the “Bot User OAuth Token” (starts with xoxb-) → paste it below. It's validated with Slack before anything is saved.",
               "In Slack, open the channel it should post in (your profile's Delivery channel) and type: /invite @standin — a bot can only post where it's been invited.",
             ],
-      manifest: slackWho !== null ? undefined : SLACK_MANIFEST,
+      manifest: slackWho !== null && !slackSendOnly ? undefined : SLACK_MANIFEST,
       permissions: [
         "Posts: chat:write — only what you approved, word for word, only where invited.",
         "Reads: history of channels the bot has been INVITED to — you control coverage channel by channel with /invite. It CANNOT read direct messages (no DM scopes at all).",

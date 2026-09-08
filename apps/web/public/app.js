@@ -1141,8 +1141,9 @@ function connCard(c) {
     el.append(cta);
   }
 
-  // setup guide, folded (steps + manifest); open by default when it's the only path
-  if (!c.connected && (c.steps || c.manifest)) {
+  // setup guide, folded (steps + manifest) — the server includes these exactly
+  // when they're needed (disconnected, or connected-but-degraded like send-only)
+  if (c.steps || c.manifest) {
     const wrap = document.createElement("div");
     wrap.style.display = "flex";
     wrap.style.flexDirection = "column";
@@ -1169,7 +1170,7 @@ function connCard(c) {
       pre.append(copy, document.createTextNode(c.manifest));
       wrap.append(pre);
     }
-    el.append(foldSection("Setup guide — step by step", wrap, c.id === "slack"));
+    el.append(foldSection("Setup guide — step by step", wrap, c.id === "slack" && !c.connected));
   }
 
   // grants, folded — always available, never sugarcoated
@@ -1243,6 +1244,7 @@ $("#triage-btn").addEventListener("click", async () => {
   try {
     const r = await api("/api/triage", {});
     toast(`Triage done — ${r.new} new item${r.new === 1 ? "" : "s"}${r.briefed ? ` · ${r.briefed} agent${r.briefed === 1 ? "" : "s"} briefing` : ""}`);
+    for (const w of r.warnings ?? []) toast(w, "err");
     await tick();
   } catch (e) { toast(e.message, "err"); }
   b.disabled = false;
