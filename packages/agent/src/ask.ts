@@ -58,6 +58,7 @@ Allowed kinds and their required params:
   {"kind":"agent.run","label":"Start a coding agent on this"}
 Rules: at most 3 proposals; every param fully specified from real context (never invent ids/urls); bodies written in the owner's voice; nothing executes until the owner clicks — say what you propose in the text too. No proposals line when just answering a question.`;
 import type { Config } from "./config.ts";
+import { recentActivity } from "./activity.ts";
 import { getIssueContext } from "./connectors/linear.ts";
 import { getIssueContextOAuth } from "./connectors/linear-mcp.ts";
 
@@ -107,6 +108,7 @@ export async function askGlobal(
   const open = listItems(db, { lanes: [3, 4] });
   const quietCount = listItems(db, { lanes: [1, 2] }).length;
   const runs = listRuns(db);
+  const activity = await recentActivity(db, config); // cached; degrades to a note, never throws
   const queueContext = open
     .map((i) => `- [lane ${i.lane}] ${i.title} — ${i.summary}${i.draft ? " (draft ready)" : ""}`)
     .join("\n");
@@ -132,6 +134,9 @@ ${queueContext || "(empty — nothing needs the owner)"}
 
 AGENT RUNS:
 ${runsContext || "(none)"}
+
+WHAT THE OWNER ACTUALLY DID — LAST 48H (git, GitHub, Linear, this app's ledger; ground any "what did I do / what happened" answer in this, never in the queue alone):
+${activity}
 
 ${conversation ? `THE CONVERSATION SO FAR:\n${conversation}\n` : ""}
 OWNER'S MESSAGE:
