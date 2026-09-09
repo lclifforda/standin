@@ -100,6 +100,49 @@ export function openDb(path: string): DB {
       stats TEXT NOT NULL
     );
   `);
+  // migration: approvals.item_id becomes nullable — conversations mint approvals
+  // that aren't anchored to an inbox item. SQLite can't drop NOT NULL, so rebuild.
+  const itemIdCol = db
+    .prepare("SELECT \"notnull\" AS nn FROM pragma_table_info('approvals') WHERE name = 'item_id'")
+    .get() as { nn: number } | undefined;
+  if (itemIdCol?.nn === 1) {
+    db.exec(`
+      BEGIN;
+      ALTER TABLE approvals RENAME TO approvals_old;
+      CREATE TABLE approvals (
+        id TEXT PRIMARY KEY,
+        item_id INTEGER REFERENCES items(id),
+        action_json TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        approved_by TEXT NOT NULL,
+        minted_at TEXT NOT NULL,
+        used_at TEXT
+      );
+      INSERT INTO approvals SELECT * FROM approvals_old;
+      DROP TABLE approvals_old;
+      COMMIT;
+    `);
+  }
+  // conversations: the central terminal — each one is a persistent agent session
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS conversations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL DEFAULT 'New conversation',
+      session_id TEXT,
+      status TEXT NOT NULL DEFAULT 'idle',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS conversation_msgs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+      role TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'done',
+      proposals TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
   return db;
 }
 
@@ -359,7 +402,7 @@ export function audit(
   db: DB,
   type: string,
   detail: string,
-  ids: { itemId?: number; approvalId?: string } = {},
+  ids: { itemId?: number | null; approvalId?: string } = {},
 ): void {
   db.prepare(
     "INSERT INTO audit (ts, type, item_id, approval_id, detail) VALUES (?, ?, ?, ?, ?)",
@@ -665,4 +708,147 @@ export function listAudit(db: DB, limit = 200): AuditEvent[] {
     approvalId: (r.approval_id as string) ?? null,
     detail: r.detail as string,
   }));
+}
+
+// --- conversations (the central terminal: persistent agent sessions) ---
+
+export interface Conversation {
+  id: number;
+  title: string;
+  sessionId: string | null;
+  status: "idle" | "running";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConvMessage {
+  id: number;
+  conversationId: number;
+  role: "owner" | "standin";
+  content: string;
+  status: "done" | "pending" | "failed";
+  proposals: ActionProposal[] | null;
+  createdAt: string;
+}
+
+function rowToConversation(r: Record<string, unknown>): Conversation {
+  return {
+    id: r.id as number,
+    title: r.title as string,
+    sessionId: (r.session_id as string) ?? null,
+    status: r.status as Conversation["status"],
+    createdAt: r.created_at as string,
+    updatedAt: r.updated_at as string,
+  };
+}
+
+export function insertConversation(db: DB, title = "New conversation"): number {
+  const now = new Date().toISOString();
+  const res = db
+    .prepare("INSERT INTO conversations (title, created_at, updated_at) VALUES (?, ?, ?)")
+    .run(title, now, now);
+  return Number(res.lastInsertRowid);
+}
+
+export function getConversation(db: DB, id: number): Conversation | null {
+  const r = db.prepare("SELECT * FROM conversations WHERE id = ?").get(id) as
+    | Record<string, unknown>
+    | undefined;
+  return r ? rowToConversation(r) : null;
+}
+
+export function listConversations(db: DB, limit = 40): Conversation[] {
+  const rows = db
+    .prepare("SELECT * FROM conversations ORDER BY updated_at DESC LIMIT ?")
+    .all(limit) as Record<string, unknown>[];
+  return rows.map(rowToConversation);
+}
+
+export function touchConversation(
+  db: DB,
+  id: number,
+  fields: { title?: string; sessionId?: string; status?: Conversation["status"] } = {},
+): void {
+  const now = new Date().toISOString();
+  if (fields.title !== undefined)
+    db.prepare("UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?").run(fields.title, now, id);
+  if (fields.sessionId !== undefined)
+    db.prepare("UPDATE conversations SET session_id = ?, updated_at = ? WHERE id = ?").run(fields.sessionId, now, id);
+  if (fields.status !== undefined)
+    db.prepare("UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?").run(fields.status, now, id);
+  if (!Object.keys(fields).length)
+    db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").run(now, id);
+}
+
+function rowToConvMsg(r: Record<string, unknown>): ConvMessage {
+  let proposals: ActionProposal[] | null = null;
+  if (r.proposals) {
+    try { proposals = JSON.parse(r.proposals as string) as ActionProposal[]; } catch { /* ignore */ }
+  }
+  return {
+    id: r.id as number,
+    conversationId: r.conversation_id as number,
+    role: r.role as ConvMessage["role"],
+    content: r.content as string,
+    status: r.status as ConvMessage["status"],
+    proposals: proposals?.length ? proposals : null,
+    createdAt: r.created_at as string,
+  };
+}
+
+export function insertConvMsg(
+  db: DB,
+  conversationId: number,
+  role: ConvMessage["role"],
+  content: string,
+  status: ConvMessage["status"] = "done",
+): number {
+  const res = db
+    .prepare(
+      "INSERT INTO conversation_msgs (conversation_id, role, content, status, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .run(conversationId, role, content, status, new Date().toISOString());
+  touchConversation(db, conversationId);
+  return Number(res.lastInsertRowid);
+}
+
+/** Live progress: swap the pending bubble's text (breadcrumbs) without resolving it. */
+export function setConvMsgContent(db: DB, id: number, content: string): void {
+  db.prepare("UPDATE conversation_msgs SET content = ? WHERE id = ?").run(content, id);
+}
+
+export function resolveConvMsg(
+  db: DB,
+  id: number,
+  content: string,
+  status: "done" | "failed",
+  proposals: ActionProposal[] | null = null,
+): void {
+  db.prepare("UPDATE conversation_msgs SET content = ?, status = ?, proposals = ? WHERE id = ?").run(
+    content,
+    status,
+    proposals?.length ? JSON.stringify(proposals) : null,
+    id,
+  );
+}
+
+export function getConvMsg(db: DB, id: number): ConvMessage | null {
+  const r = db.prepare("SELECT * FROM conversation_msgs WHERE id = ?").get(id) as
+    | Record<string, unknown>
+    | undefined;
+  return r ? rowToConvMsg(r) : null;
+}
+
+export function updateConvMsgProposals(db: DB, id: number, proposals: ActionProposal[]): void {
+  db.prepare("UPDATE conversation_msgs SET proposals = ? WHERE id = ?").run(
+    proposals.length ? JSON.stringify(proposals) : null,
+    id,
+  );
+}
+
+export function listConvMsgs(db: DB, conversationId: number): ConvMessage[] {
+  const rows = db
+    .prepare("SELECT * FROM conversation_msgs WHERE conversation_id = ? ORDER BY id ASC")
+    .all(conversationId) as Record<string, unknown>[];
+  return rows.map(rowToConvMsg);
 }

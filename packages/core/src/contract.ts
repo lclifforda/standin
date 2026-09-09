@@ -35,7 +35,7 @@ function hashAction(actionJson: string): string {
 /** Record the owner's explicit yes for exactly this action. */
 export function mintApproval(
   db: DB,
-  itemId: number,
+  itemId: number | null, // null when the yes came from a conversation, not an item
   action: ActionSpec,
   approvedBy: string,
 ): Approval {

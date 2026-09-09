@@ -347,3 +347,12 @@ main>section:not([hidden]){animation:viewin .18s ease-out}
 .assigned-panel .feed-row{border-right:1px solid var(--line-soft)}
 .spill{font:500 10px "IBM Plex Mono",monospace;border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--muted)}
 .spill.started{border-color:var(--accent);color:var(--accent-ink)}
+
+/* wrap-up (standup) */
+.wrapup-controls{display:flex;gap:6px}
+.wrapup-controls button{padding:2px 12px;font-size:11px}
+.wrapup-panel .md{padding:6px 18px 14px}
+
+/* chats — the central terminal */
+.row.sel{background:var(--surface);box-shadow:var(--shadow)}
+#c-list .row{text-decoration:none;color:inherit;display:block}

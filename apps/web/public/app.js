@@ -72,6 +72,8 @@ const state = {
   owner: "",
   autopilot: false,
   feeds: null, // /api/feeds payload: source streams + the replica's persistent chat
+  convs: [],   // conversation list (the central terminal)
+  conv: null,  // open conversation: { conversation, msgs }
   ui: {
     drafts: new Map(),     // itemId -> locally edited draft (authoritative once edited)
     draftBase: new Map(),  // itemId -> server draft at detail-build time
@@ -112,6 +114,8 @@ function isLive() {
   if (state.runs.some((r) => r.status === "running" || r.status === "waiting")) return true;
   if ([...state.ui.overlay.values()].some((o) => o.length)) return true;
   if (state.feeds?.chat?.some((m) => m.status === "pending")) return true;
+  if (state.conv?.msgs?.some((m) => m.status === "pending")) return true;
+  if (state.convs.some((c) => c.status === "running")) return true;
   return state.queue.tasks.some((t) => t.chat?.some((m) => m.status === "pending"));
 }
 
@@ -127,6 +131,13 @@ async function tick() {
     state.queue = { tasks: q.tasks ?? [], quiet: q.quiet ?? 0, noise: q.noise ?? [] };
     state.runs = r.runs ?? [];
     if (state.route.view === "home") state.feeds = await api("/api/feeds");
+    if (state.route.view === "chats") {
+      state.convs = (await api("/api/conversations")).conversations;
+      if (state.route.id) {
+        try { state.conv = await api(`/api/conversations/${state.route.id}`); }
+        catch { state.conv = null; }
+      }
+    }
     if (state.route.view === "ledger") state.audit = (await api("/api/audit")).events;
   } catch { /* server hiccup — keep last state */ }
   ticking = false;
@@ -442,6 +453,34 @@ function renderFeeds() {
   paint("#feed-github", f.github, "No open PRs involving you right now.");
 }
 
+/* wrap-up: the standup summary — composed server-side from real activity
+   (git, GitHub, Linear, the ledger), cached per day, ↻ recomposes. */
+let wrapupDay = null;
+function localDayStr(offset = 0) {
+  const d = new Date(Date.now() + offset * 86400000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+async function loadWrapup(day, refresh = false) {
+  const panel = $("#home-wrapup");
+  wrapupDay = day;
+  panel.replaceChildren(Object.assign(document.createElement("div"), {
+    className: "empty", innerHTML: "Reading your commits, PRs and plate… (~15s)",
+  }));
+  try {
+    const r = await api(`/api/wrapup?day=${day}${refresh ? "&refresh=1" : ""}` );
+    if (wrapupDay !== day) return; // the owner clicked the other day meanwhile
+    panel.replaceChildren(md(r.markdown));
+    $("#wrapup-refresh").hidden = false;
+  } catch (err) {
+    panel.replaceChildren(Object.assign(document.createElement("div"), {
+      className: "empty", innerHTML: "Couldn't compose the wrap-up: " + esc(err.message),
+    }));
+  }
+}
+$("#wrapup-yesterday").addEventListener("click", () => loadWrapup(localDayStr(-1)));
+$("#wrapup-today").addEventListener("click", () => loadWrapup(localDayStr(0)));
+$("#wrapup-refresh").addEventListener("click", () => wrapupDay && loadWrapup(wrapupDay, true));
+
 $("#home-ask").addEventListener("submit", async (e) => {
   e.preventDefault();
   const input = $("#home-input");
@@ -456,6 +495,146 @@ $("#home-ask").addEventListener("submit", async (e) => {
     scheduleTick(true); // the pending answer resolves server-side; polling picks it up
   } catch (err) { toast(err.message, "err"); }
 });
+
+/* ============ chats — the central terminal ============ */
+/* Each conversation is a persistent agent session server-side: it reads the
+   owner's world live, remembers, spawns work runs, and proposes actions the
+   owner's click executes through the contract. */
+let cd = { key: null };
+
+$("#new-conv").addEventListener("click", async () => {
+  try {
+    const r = await api("/api/conversations", {});
+    state.conv = null;
+    location.hash = `#/chats/${r.id}`;
+  } catch (e) { toast(e.message, "err"); }
+});
+
+function renderChatsList() {
+  const el = $("#c-list");
+  if (!state.convs.length) {
+    el.replaceChildren(Object.assign(document.createElement("div"), {
+      className: "empty",
+      innerHTML: "<b>No conversations yet.</b> Start one — think out loud, dispatch work, ask what happened.",
+    }));
+    return;
+  }
+  if (el.firstElementChild?.className === "empty") el.replaceChildren();
+  syncList(el, state.convs, {
+    key: (c) => "c" + c.id,
+    sig: (c) => `${c.status}|${c.title}|${c.last}|${state.route.id === c.id}`,
+    create: () => document.createElement("a"),
+    update: (row, c) => {
+      row.className = "row" + (state.route.id === c.id ? " sel" : "");
+      row.href = `#/chats/${c.id}`;
+      row.innerHTML = `
+        <div class="rtop">
+          ${c.status === "running" ? `<span class="rpill running">thinking…</span>` : `<span>chat</span>`}
+          <span class="when">${timeAgo(c.updatedAt)}</span>
+        </div>
+        <div class="rtitle">${esc(c.title)}</div>
+        <div class="rsub">${esc(c.last || "—")}</div>`;
+    },
+  });
+}
+
+function convBubbleFill(el, m) {
+  el.className = `bubble ${m.role}` + (m.status === "pending" ? " pending" : m.status === "failed" ? " failed" : "");
+  el.replaceChildren();
+  if (m.status === "pending") el.textContent = m.content || "reading your world and thinking…";
+  else if (m.status === "failed") el.textContent = "failed: " + m.content;
+  else if (m.role === "standin") {
+    el.append(md(m.content));
+    if (m.proposals?.length) {
+      const row = document.createElement("div");
+      row.className = "actions";
+      row.style.marginTop = "8px";
+      m.proposals.forEach((p, index) => {
+        const b = mkBtn(p.label, "primary", async () => {
+          b.disabled = true;
+          try {
+            const r = await api(`/api/conversations/msgs/${m.id}/approve`, { index });
+            toast("✓ " + r.note);
+            if (state.conv) state.conv.msgs = r.msgs;
+            render();
+            scheduleTick(true);
+          } catch (e) { toast(e.message, "err"); b.disabled = false; }
+        });
+        b.style.fontSize = "12px";
+        row.append(b);
+      });
+      el.append(row);
+    }
+  } else el.textContent = m.content;
+}
+
+function renderChatsDetail() {
+  const pane = $("#c-detail");
+  if (!state.route.id) {
+    if (cd.key !== "none") {
+      cd = { key: "none" };
+      pane.replaceChildren(Object.assign(document.createElement("div"), {
+        className: "dplaceholder",
+        textContent: "Pick a conversation, or start a new one — this is your terminal.",
+      }));
+    }
+    return;
+  }
+  const payload = state.conv;
+  if (!payload || payload.conversation.id !== state.route.id) {
+    if (cd.key !== "loading" + state.route.id) {
+      cd = { key: "loading" + state.route.id };
+      pane.replaceChildren(Object.assign(document.createElement("div"), { className: "dplaceholder", textContent: "loading…" }));
+    }
+    return;
+  }
+  const conv = payload.conversation;
+  if (cd.key !== "c" + conv.id) {
+    cd = { key: "c" + conv.id };
+    pane.replaceChildren();
+    cd.scroll = document.createElement("div");
+    cd.scroll.className = "dscroll";
+    cd.scroll.innerHTML = `
+      <div class="dhead">
+        <div class="dmeta"><a class="backlink" href="#/chats">← chats</a><span data-cstatus></span></div>
+        <div class="dtitle" data-ctitle></div>
+      </div>`;
+    cd.thread = document.createElement("div");
+    cd.thread.className = "thread";
+    cd.scroll.append(cd.thread);
+    const form = document.createElement("form");
+    form.className = "askbar";
+    cd.input = document.createElement("input");
+    cd.input.placeholder = "talk to your replica — it can go read, code (yolo), and propose sends…";
+    const send = mkBtn("Send", "primary");
+    send.type = "submit";
+    form.append(cd.input, send);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const text = cd.input.value.trim();
+      if (!text) return;
+      cd.input.value = "";
+      try {
+        const r = await api(`/api/conversations/${conv.id}/message`, { text });
+        if (state.conv) state.conv.msgs = r.msgs;
+        render();
+        scheduleTick(true);
+      } catch (err) { toast(err.message, "err"); }
+    });
+    pane.append(cd.scroll, form);
+    cd.input.focus();
+  }
+  $("[data-ctitle]", cd.scroll).textContent = conv.title;
+  $("[data-cstatus]", cd.scroll).textContent = conv.status === "running" ? "thinking…" : "";
+  const near = cd.scroll.scrollHeight - cd.scroll.scrollTop - cd.scroll.clientHeight < 60;
+  syncList(cd.thread, payload.msgs, {
+    key: (m) => "m" + m.id,
+    sig: (m) => `${m.status}|${(m.content ?? "").length}|${m.proposals?.length ?? 0}`,
+    create: () => { const el = document.createElement("div"); el.setAttribute("data-bubble", ""); return el; },
+    update: convBubbleFill,
+  });
+  if (near) cd.scroll.scrollTop = cd.scroll.scrollHeight;
+}
 
 /* ============ the orb ============ */
 function startOrb() {
@@ -526,6 +705,8 @@ async function loadConnections() {
 /* ============ router ============ */
 const ROUTES = [
   [/^#\/home$/, () => ({ view: "home", id: null })],
+  [/^#\/chats\/(\d+)$/, (m) => ({ view: "chats", id: +m[1] })],
+  [/^#\/chats$/, () => ({ view: "chats", id: null })],
   [/^#\/queue\/item\/(\d+)$/, (m) => ({ view: "queue", id: +m[1] })],
   [/^#\/queue$/, () => ({ view: "queue", id: null })],
   [/^#\/work\/run\/(\d+)$/, (m) => ({ view: "work", id: +m[1] })],
@@ -539,6 +720,7 @@ function onHash() {
     const m = hash.match(re);
     if (m) {
       state.route = fn(m);
+      if (state.route.view === "chats") tick(); // fetch list + open conversation now
       if (state.route.view === "connections") loadConnections();
       if (state.route.view === "ledger") {
         api("/api/audit").then((r) => { state.audit = r.events; renderLedger(); });
@@ -555,12 +737,13 @@ window.addEventListener("hashchange", onHash);
 /* ============ render root + topbar ============ */
 function render() {
   renderTopbar();
-  for (const v of ["home", "queue", "work", "connections", "ledger"]) {
+  for (const v of ["home", "chats", "queue", "work", "connections", "ledger"]) {
     const sec = $("#view-" + v);
     sec.hidden = state.route.view !== v;
     sec.classList.toggle("has-id", state.route.view === v && state.route.id != null);
   }
   if (state.route.view === "home") renderHome();
+  else if (state.route.view === "chats") { renderChatsList(); renderChatsDetail(); }
   else if (state.route.view === "queue") { renderQueueList(); renderQueueDetail(); }
   else if (state.route.view === "work") { renderWorkList(); renderWorkDetail(); }
   else if (state.route.view === "ledger") renderLedger();
@@ -578,6 +761,10 @@ function renderTopbar() {
   const bw = $("#badge-work");
   bw.hidden = waiting === 0;
   bw.textContent = waiting;
+  const thinking = state.convs.filter((c) => c.status === "running").length;
+  const bc = $("#badge-chats");
+  bc.hidden = thinking === 0;
+  bc.textContent = thinking;
   const y = $("#yolo");
   y.classList.toggle("on", state.yolo);
   y.setAttribute("aria-checked", String(state.yolo));

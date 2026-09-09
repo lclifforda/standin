@@ -76,7 +76,7 @@ export interface InboxItem extends RawItem {
 
 export interface Approval {
   id: string;
-  itemId: number;
+  itemId: number | null; // null: approved from a conversation, not an inbox item
   actionJson: string;
   contentHash: string;
   approvedBy: string;

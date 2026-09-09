@@ -18,12 +18,19 @@ import {
   executedKinds,
   finishRun,
   getChat,
+  getConversation,
+  getConvMsg,
   getItem,
   getQuestion,
   getRun,
   getSetting,
   insertChat,
+  insertConversation,
+  insertConvMsg,
   insertHomeChat,
+  listConversations,
+  listConvMsgs,
+  updateConvMsgProposals,
   listBySource,
   listHomeChats,
   isoWeek,
@@ -57,13 +64,16 @@ import {
   issueIdentifier,
   type AssignedIssue,
   buildExecutors,
+  composeWrapup,
   connectLinearOAuth,
   connectWithToken,
   continueWorkRun,
   disconnect,
   listConnections,
   loadConfig,
+  localDay,
   runTriage,
+  sendToConversation,
   startWorkRun,
 } from "@standin/agent";
 
@@ -445,6 +455,59 @@ const server = createServer(async (req, res) => {
         .sort((a, b) => b.week.localeCompare(a.week))
         .slice(0, 12);
       json(res, 200, { weeks, currentWeek: isoWeek(new Date().toISOString()) });
+    } else if (req.method === "GET" && url.pathname === "/api/conversations") {
+      // the central terminal: persistent agent sessions, newest activity first
+      json(res, 200, {
+        conversations: listConversations(db).map((c) => ({
+          ...c,
+          last: listConvMsgs(db, c.id).at(-1)?.content.slice(0, 90) ?? "",
+        })),
+      });
+    } else if (req.method === "POST" && url.pathname === "/api/conversations") {
+      const id = insertConversation(db);
+      audit(db, "conversation.started", `conversation #${id} opened`);
+      json(res, 200, { id });
+    } else if (req.method === "GET" && url.pathname.match(/^\/api\/conversations\/\d+$/)) {
+      const id = Number(url.pathname.split("/")[3]);
+      const conv = getConversation(db, id);
+      conv
+        ? json(res, 200, { conversation: conv, msgs: listConvMsgs(db, id) })
+        : json(res, 404, { error: `no conversation #${id}` });
+    } else if (req.method === "POST" && url.pathname.match(/^\/api\/conversations\/\d+\/message$/)) {
+      const id = Number(url.pathname.split("/")[3]);
+      const body = await readBody(req);
+      if (typeof body.text !== "string" || !body.text.trim())
+        return json(res, 400, { error: "text required" });
+      sendToConversation(db, config, id, body.text.trim());
+      json(res, 200, { msgs: listConvMsgs(db, id) });
+    } else if (req.method === "POST" && url.pathname.match(/^\/api\/conversations\/msgs\/\d+\/approve$/)) {
+      // A conversation proposal: the owner's click IS the yes.
+      const msgId = Number(url.pathname.split("/")[4]);
+      const body = await readBody(req);
+      const idx = Number(body.index ?? 0);
+      const msg = getConvMsg(db, msgId);
+      const proposal = msg?.proposals?.[idx];
+      if (!msg || !proposal) return json(res, 404, { error: "no such proposal (already used?)" });
+      const action = proposalToAction(proposal);
+      if (!action) return json(res, 400, { error: `proposal is missing params for ${proposal.kind}` });
+      const approval = mintApproval(db, null, action, "web-ui:conversation");
+      const note = await executeApproved(db, approval.id, executors);
+      updateConvMsgProposals(db, msgId, (msg.proposals ?? []).filter((_, i) => i !== idx));
+      insertConvMsg(db, msg.conversationId, "standin", `✓ ${note}`);
+      json(res, 200, { ok: true, note, msgs: listConvMsgs(db, msg.conversationId) });
+    } else if (req.method === "GET" && url.pathname === "/api/wrapup") {
+      // The standup wrap-up: what the owner actually did that day, in their
+      // voice. Composed once per day and cached; ?refresh=1 recomposes.
+      const day = url.searchParams.get("day") ?? localDay();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return json(res, 400, { error: "day must be YYYY-MM-DD" });
+      const cacheKey = `wrapup:${day}`;
+      const cached = getSetting(db, cacheKey);
+      if (cached && url.searchParams.get("refresh") !== "1")
+        return json(res, 200, { day, markdown: cached, cached: true });
+      const markdown = await composeWrapup(db, config, day);
+      setSetting(db, cacheKey, markdown);
+      audit(db, "wrapup.composed", `daily wrap-up composed for ${day}`);
+      json(res, 200, { day, markdown, cached: false });
     } else if (req.method === "POST" && url.pathname === "/api/triage") {
       pruneAndRollup(db);
       const r = await runTriage(config);
@@ -572,3 +635,27 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`standin · decision queue → http://localhost:${PORT}`);
   console.log(`brain: ${config.brainDir}`);
 });
+
+// The pulse: the replica doesn't just wait to be asked. During the owner's
+// hours it re-triages every ~3h, and each morning it has yesterday's wrap-up
+// composed before they ask. Read-and-prepare only — never a send.
+setInterval(async () => {
+  const hour = new Date().getHours();
+  if (hour < 8 || hour >= 19) return;
+  try {
+    const lastAt = getSetting(db, "triage.lastAt");
+    if (!lastAt || Date.now() - Date.parse(lastAt) > 3 * 60 * 60 * 1000) {
+      setSetting(db, "triage.lastAt", new Date().toISOString()); // claim before running: no overlap
+      pruneAndRollup(db);
+      await runTriage(config); // audits its own triage.run entry
+    }
+    const yday = localDay(new Date(Date.now() - 24 * 60 * 60 * 1000));
+    if (!getSetting(db, `wrapup:${yday}`)) {
+      const markdown = await composeWrapup(db, config, yday);
+      setSetting(db, `wrapup:${yday}`, markdown);
+      audit(db, "wrapup.composed", `heartbeat: wrap-up ready for ${yday}`);
+    }
+  } catch (err) {
+    console.error("heartbeat:", err);
+  }
+}, 30 * 60 * 1000);

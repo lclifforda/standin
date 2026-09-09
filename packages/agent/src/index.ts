@@ -11,5 +11,7 @@ export {
 } from "./connections.ts";
 export { startWorkRun, continueWorkRun } from "./work.ts";
 export { askAboutItem, askGlobal, issueIdentifier } from "./ask.ts";
+export { composeWrapup, localDay } from "./activity.ts";
+export { sendToConversation } from "./converse.ts";
 export { fetchAssignedIssues, type AssignedIssue } from "./connectors/linear.ts";
 export { fetchAssignedOAuth } from "./connectors/linear-mcp.ts";
